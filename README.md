@@ -37,11 +37,13 @@ Aucune dépendance côté appli : HTML, CSS et JavaScript.
 
 ## Mise en ligne (GitHub Pages)
 
+À faire une fois : *Settings → Pages → Build and deployment → Source* : **GitHub Actions**.
+
 Le workflow « Prix Cardmarket, nouveautés et publication » fait tout :
 prix chaque jour vers 7 h, nouvelles séries chaque lundi, puis publication sur GitHub Pages.
 Pour relancer un import complet : *Actions → Run workflow*, cocher **nouveautés**.
 
-Adresse : `https://erzs247.github.io/weissdex/` puis, sur le téléphone, « Ajouter à l'écran d'accueil ».
+Adresse : `https://erzs247.github.io/WeissDex/` puis, sur le téléphone, « Ajouter à l'écran d'accueil ».
 
 ## Comptes (Firebase)
 
