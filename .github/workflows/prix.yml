@@ -35,6 +35,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Extensions anglaises absentes de WS Lounge (site officiel)
+        continue-on-error: true
+        timeout-minutes: 35
+        run: node scripts/fetch-official.mjs --minutes 25
       - name: Séries et cartes WS Lounge (EN, JP) + liens Cardmarket
         run: node scripts/import-ws.mjs
       - name: Accès aux images (site officiel et vignettes)

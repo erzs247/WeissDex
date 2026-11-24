@@ -21,6 +21,8 @@ Aucune dépendance côté appli : HTML, CSS et JavaScript.
 
 - **Cartes : [WS Lounge](https://github.com/gabrielcpws-ctrl/ws_lounge_db)**, base ouverte publiée sous licence
   **CC0 1.0** (domaine public, réutilisation libre), anglais et japonais, d'après les listes officielles de Bushiroad.
+  Les extensions anglaises qui manquent à WS Lounge (sorties récentes, quelques anciennes) sont complétées depuis la
+  liste officielle de Bushiroad (`en.ws-tcg.com/cardlist`), pour cet usage personnel et non commercial.
 - **Images** : celles des listes officielles (`ws-tcg.com`, `en.ws-tcg.com`), affichées directement (rien n'est copié dans le dépôt).
   Les vignettes sont réduites à la volée par [wsrv.nl](https://wsrv.nl) (service d'images libre et gratuit) ;
   `"thumb": ""` dans `data/config.json` le désactive. Images de secours, dans l'ordre : image d'origine, même carte dans
@@ -31,6 +33,7 @@ Aucune dépendance côté appli : HTML, CSS et JavaScript.
 
 | Script | Rôle |
 |---|---|
+| `scripts/fetch-official.mjs` | extensions anglaises absentes de WS Lounge, lues sur la liste officielle (en.ws-tcg.com) → `data/official-en.json` (une seule fois par extension) |
 | `scripts/import-ws.mjs` | séries et cartes EN / JP → `data/catalog.json` (séries) + `data/cards-en.json`, `data/cards-ja.json`, liens Cardmarket |
 | `scripts/update-prices.mjs` | prix du jour → `data/prices.json` et historique → `data/history/<série>.json` (chargé à la demande) |
 | `scripts/make-scan-index.mjs` | empreintes du scanner → `data/scan/<édition>.json` (1500 nouvelles images au plus par passage, après la publication) |

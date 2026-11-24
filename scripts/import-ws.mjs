@@ -38,10 +38,18 @@ for (const f of readdirSync(join(src, 'cards')).filter((n) => n.endsWith('.json'
 const expIndex = new Map(JSON.parse(readFileSync(join(src, 'expansions.json'), 'utf8')).map((e) => [e.expansion_id, e]));
 if (tmp) rmSync(tmp, { recursive: true, force: true });
 console.log(`${raw.length} cartes dans la base.`);
+// compléments : extensions anglaises absentes de WS Lounge, lues sur le site officiel (scripts/fetch-official.mjs)
+const offPath = join(root, 'data/official-en.json');
+if (existsSync(offPath)) {
+  const known = new Set(raw.map((r) => r.code));
+  const extra = Object.values(JSON.parse(readFileSync(offPath, 'utf8')).cards ?? {}).filter((c) => !known.has(c.code));
+  for (const c of extra) raw.push({ ...c, _official: true });
+  console.log(`${extra.length} cartes ajoutées depuis le site officiel.`);
+}
 
 const LANG = { EN: 'en', JP: 'ja' };
 const COLOR = { YELLOW: 'Yellow', GREEN: 'Green', RED: 'Red', BLUE: 'Blue', PURPLE: 'Purple' };
-const TRIG = { SOUL: 'soul', DRAW: 'draw', SHOT: 'shot', BOUNCE: 'return', RETURN: 'return', COMEBACK: 'door', DOOR: 'door', POOL: 'pool', TREASURE: 'gold', GOLDBAR: 'gold', GATE: 'gate', CHOICE: 'choice', STANDBY: 'standby', BOOK: 'book' };
+const TRIG = { SOUL: 'soul', DRAW: 'draw', SHOT: 'shot', BOUNCE: 'return', RETURN: 'return', COMEBACK: 'door', DOOR: 'door', POOL: 'pool', STOCK: 'pool', SALVAGE: 'door', TREASURE: 'gold', GOLDBAR: 'gold', GATE: 'gate', CHOICE: 'choice', STANDBY: 'standby', BOOK: 'book' };
 const safe = (s) => String(s).replace(/\//g, '_');                       // pas de « / » dans les identifiants (documents Firestore, URL)
 const setCodeOf = (lang, exp) => (lang === 'ja' ? `J-${safe(exp)}` : safe(exp));
 const num = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? undefined : Number(v));
@@ -78,6 +86,7 @@ for (const r of raw) {
     sets.set(code, s);
   }
   const c = { id, set: code, number: r.sid || r.code.split('-').pop(), name: r.name };
+  if (r._official) c.src = 'off';
   if (r.rarity) c.rarity = r.rarity;
   if (r.type) c.type = r.type;
   if (COLOR[r.color]) c.color = COLOR[r.color];
