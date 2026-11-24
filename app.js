@@ -1544,6 +1544,41 @@ function navStep(dir) {
   if (i >= 0 && next) openCard(next, true);
 }
 const sheetPanel = document.getElementById('sheetPanel');
+// Glisser la fiche d'une carte vers la gauche / la droite : carte suivante / précédente de la liste
+// (la fiche suit le doigt ; la courbe de prix, les champs et la vue 3D gardent leurs propres gestes)
+const swipe = { x: 0, y: 0, dx: 0, on: false, lock: null };
+const swipeTarget = () => sheetPanel.querySelector('.detail');
+sheetPanel.addEventListener('touchstart', (e) => {
+  swipe.on = false; swipe.lock = null;
+  if (e.touches.length !== 1 || !openId || sheetMode || gOpen || gForm || navList.length < 2) return;
+  if (e.target.closest('.chart, .ranges, input, select, textarea, .stepper, .c3d')) return;
+  swipe.x = e.touches[0].clientX; swipe.y = e.touches[0].clientY; swipe.dx = 0; swipe.on = true;
+}, { passive: true });
+sheetPanel.addEventListener('touchmove', (e) => {
+  if (!swipe.on) return;
+  const dx = e.touches[0].clientX - swipe.x, dy = e.touches[0].clientY - swipe.y;
+  if (!swipe.lock && Math.abs(dx) + Math.abs(dy) > 10) swipe.lock = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
+  if (swipe.lock !== 'x') return;
+  const i = navList.indexOf(openId);
+  const edge = (dx > 0 && i <= 0) || (dx < 0 && i >= navList.length - 1);
+  swipe.dx = edge ? dx / 4 : dx; // résistance au bout de la liste
+  const el = swipeTarget();
+  if (el) { el.style.transition = 'none'; el.style.transform = `translateX(${swipe.dx}px)`; el.style.opacity = String(1 - Math.min(Math.abs(swipe.dx) / 600, 0.4)); }
+}, { passive: true });
+sheetPanel.addEventListener('touchend', () => {
+  if (!swipe.on) return;
+  swipe.on = false;
+  const el = swipeTarget();
+  const i = navList.indexOf(openId);
+  const dir = swipe.dx < -70 ? 1 : swipe.dx > 70 ? -1 : 0;
+  if (swipe.lock === 'x' && dir && navList[i + dir]) {
+    navStep(dir);
+    const nw = swipeTarget();
+    if (nw) nw.classList.add(dir > 0 ? 'swipe-in-right' : 'swipe-in-left');
+    return;
+  }
+  if (el) { el.style.transition = 'transform .2s ease, opacity .2s ease'; el.style.transform = ''; el.style.opacity = ''; }
+});
 // icônes de trigger (âme, pioche, choix, porte…) : simples symboles texte
 const TRIG_ICON = { soul: '✦', draw: '📖', shot: '⚡', return: '🌀', door: '🚪', pool: '💰', gold: '🏅', gate: '⛩', choice: '❓', standby: '⏳', book: '📕' };
 const trigIcon = (t) => `<span class="trig" title="${esc(t)}">${TRIG_ICON[t] ?? esc(t)}</span>`;

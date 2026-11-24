@@ -1334,3 +1334,11 @@ body { background:
 .anime-tile .fav-dot svg { width: 18px; height: 18px; fill: currentColor; }
 .anime-count { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; padding: 3px 8px; border-radius: 6px; background: var(--fg); color: #121216; font: 700 12px var(--font-display); }
 @media (min-width: 700px) { .anime-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); } .anime-tile { min-height: 180px; } }
+
+/* fiche carte : glisser vers la carte suivante / précédente */
+.sheet-panel .detail { touch-action: pan-y; will-change: transform; }
+.swipe-in-right { animation: swipeInRight .22s ease-out; }
+.swipe-in-left { animation: swipeInLeft .22s ease-out; }
+@keyframes swipeInRight { from { transform: translateX(60px); opacity: .4; } to { transform: none; opacity: 1; } }
+@keyframes swipeInLeft { from { transform: translateX(-60px); opacity: .4; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .swipe-in-right, .swipe-in-left { animation: none; } }
