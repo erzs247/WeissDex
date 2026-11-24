@@ -62,7 +62,7 @@ jobs:
           git config user.email "weissdex-bot@users.noreply.github.com"
           git add data/
           git diff --cached --quiet || git commit -m "Nouveautés du $(date +%F)"
-          git pull --rebase origin main && git push
+          git pull --rebase -X theirs origin main && git push
 
   prix:
     needs: [nouveautes]
@@ -84,7 +84,7 @@ jobs:
           git config user.email "weissdex-bot@users.noreply.github.com"
           git add data/
           git diff --cached --quiet || git commit -m "Prix Cardmarket du $(date +%F)"
-          git pull --rebase origin main && git push
+          git pull --rebase -X theirs origin main && git push
 
   publier:
     needs: [prix]
@@ -132,4 +132,4 @@ jobs:
           git config user.email "weissdex-bot@users.noreply.github.com"
           git add data/scan
           git diff --cached --quiet || git commit -m "Scanner du $(date +%F)"
-          git pull --rebase origin main && git push
+          git pull --rebase -X theirs origin main && git push
