@@ -1,0 +1,22 @@
+name: Comparer avec la liste officielle
+
+on:
+  workflow_dispatch:
+    inputs:
+      id:
+        description: "Numéro d'extension du site officiel à détailler (ex. 289)"
+        type: string
+        default: "289"
+
+permissions:
+  contents: read
+
+jobs:
+  comparer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/official-expansions.mjs --id "${{ inputs.id }}"
