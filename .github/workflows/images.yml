@@ -1,0 +1,25 @@
+name: Vérifier les images
+
+on:
+  workflow_dispatch:
+    inputs:
+      series:
+        description: "Début du code des séries à vérifier (ex. Ffp) ; vide = échantillon de toute la base"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Images des cartes
+        run: |
+          if [ -n "${{ inputs.series }}" ]; then node scripts/check-images.mjs --sets "${{ inputs.series }}"; else node scripts/check-images.mjs --sample 6; fi
