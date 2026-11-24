@@ -40,7 +40,9 @@ if (tmp) rmSync(tmp, { recursive: true, force: true });
 console.log(`${raw.length} cartes dans la base.`);
 // compléments : extensions anglaises absentes de WS Lounge, lues sur le site officiel (scripts/fetch-official.mjs)
 const offPath = join(root, 'data/official-en.json');
+let officialNames = {};
 if (existsSync(offPath)) {
+  officialNames = JSON.parse(readFileSync(offPath, 'utf8')).names ?? {};
   const known = new Set(raw.map((r) => r.code));
   const extra = Object.values(JSON.parse(readFileSync(offPath, 'utf8')).cards ?? {}).filter((c) => !known.has(c.code));
   for (const c of extra) raw.push({ ...c, _official: true });
@@ -82,7 +84,8 @@ for (const r of raw) {
   let s = sets.get(code);
   if (!s) {
     const e = expIndex.get(r.expansion_id) ?? {};
-    s = { code, print: r.expansion_id, name: e.expansion_name || r.expansion || r.expansion_id, block: r.set || e.series_code || 'misc', side: e.side ?? r.side ?? '', lang, urls: [] };
+    // nom officiel anglais quand on le connaît (certains noms de WS Lounge sont faux, ex. Goblin Slayer)
+    s = { code, print: r.expansion_id, name: officialNames[r.expansion_id] || e.expansion_name || r.expansion || r.expansion_id, block: r.set || e.series_code || 'misc', side: e.side ?? r.side ?? '', lang, urls: [] };
     sets.set(code, s);
   }
   const c = { id, set: code, number: r.sid || r.code.split('-').pop(), name: r.name };
@@ -253,11 +256,11 @@ allSets.forEach((s, i) => {
 // nom de chaque licence : le nom de série le plus courant (en nombre de cartes)
 // (les séries sans nom dans la base portent leur code : on prend alors celui d'une autre série de la licence)
 const prints = new Set(allSets.map((x) => x.print));
-const named = (n) => !prints.has(n);
+const named = (n) => !prints.has(n) && !/^PR Card/i.test(n);  // « PR Card 【… Side】 » : nom générique des promos
 // nom d'animé sans les mots de produit (« Booster Pack TV Anime “DANDADAN” » → « DANDADAN »)
 const animeName = (n) => {
   let x = String(n).trim();
-  for (let i = 0; i < 3; i++) x = x.replace(/^\[[^\]]*\]\s*/, '').replace(/^(Premium |Extra |Meta |Power-?up )?(Booster|Trial Deck\+?|Starter Deck)( Pack| Set)?\s+/i, '').replace(/^(TV Anime|Anime|Movie|Theatrical Version|Theatrical Edition)\s+/i, '').trim();
+  for (let i = 0; i < 3; i++) x = x.replace(/^\[[^\]]*\]\s*/, '').replace(/^(Premium |Extra |Meta |Power-?up )?(Booster|Trial Deck\+?|Starter Deck)( Pack| Set)?\s+/i, '').replace(/^(Chronicle Set|Premium Set|Power Up Set \d*\s*-?)\s+/i, '').replace(/^(TV Anime|Anime|Movie|Theatrical Version|Theatrical Edition)\s+/i, '').trim();
   x = x.replace(/^[“"「『](.+)[”"」』]$/, '$1').replace(/\s+(Vol\.?\s*\d+|Specials?)$/i, '').trim();
   return x || String(n);
 };

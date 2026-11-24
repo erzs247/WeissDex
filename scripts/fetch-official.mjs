@@ -71,6 +71,7 @@ const path = join(root, 'data/official-en.json');
 const state = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
 state.covered ??= {};   // extension officielle → « wsl » (déjà dans WS Lounge) ou « official » (lue ici)
 state.cards ??= {};     // code → carte lue sur le site officiel
+state.names ??= {};     // code d'extension (ex. GBS/S63) → nom officiel (corrige les noms de WS Lounge)
 console.log(`WS Lounge : ${have.size} cartes anglaises. Déjà complétées : ${Object.values(state.covered).filter((v) => v === 'official').length} extensions.`);
 
 const home = await get('/cardlist/');
@@ -81,7 +82,7 @@ console.log(`${ids.length} extensions sur le site officiel.`);
 let added = 0, read = 0;
 for (const id of ids) {
   if (Date.now() > stopAt) { console.log('Temps écoulé : la suite au prochain passage.'); break; }
-  if (state.covered[id] === 'wsl' || (state.covered[id] === 'official' && !RECHECK)) continue;
+  if ((state.covered[id] === 'wsl' && state.named?.includes(id)) || (state.covered[id] === 'official' && !RECHECK)) continue;
   const first = await get(`/cardlist/searchresults/?expansion=${id}&view=text&sort=no`);
   if (!first) continue;
   read++;
@@ -89,6 +90,12 @@ for (const id of ids) {
   const total = Number(first.match(/Search Results<span>(\d+)<\/span>/)?.[1] ?? 0);
   const page1 = parsePage(first, expansion);
   if (!page1.length) continue;
+  // nom officiel de chaque code d'extension (le booster plutôt que son deck de démarrage)
+  for (const c of page1) {
+    const cur = state.names[c.expansion_id];
+    if (!cur || (/^\[TD\]|Trial Deck/i.test(cur) && !/^\[TD\]|Trial Deck/i.test(expansion))) state.names[c.expansion_id] = expansion;
+  }
+  state.named = [...new Set([...(state.named ?? []), id])];
   const known = page1.filter((c) => have.has(c.code)).length;
   if (known >= page1.length * 0.6) { state.covered[id] = 'wsl'; continue; } // déjà dans la base ouverte
   const cards = [...page1];
