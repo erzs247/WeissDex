@@ -20,3 +20,4 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/official-expansions.mjs --id "${{ inputs.id }}"
+      - run: node scripts/official-dump.mjs
