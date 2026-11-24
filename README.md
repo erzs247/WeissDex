@@ -4,7 +4,7 @@ Appli web (installable sur téléphone, utilisable hors connexion) pour suivre s
 sur le modèle de CardDex (lui-même tiré de NightDex) et de Pokécardex.
 
 - **Deux éditions** (bouton EN | JP) : anglaise et japonaise. Chaque édition a ses séries, ses cartes et **sa propre collection**.
-- **Accueil** : les séries regroupées par licence, les plus récentes en tête (les séries vides dans une édition sont masquées).
+- **Accueil** : un onglet par animé (licence), les plus récents en tête ; dans chaque animé, ses séries et ses personnages (les séries vides dans une édition sont masquées).
 - **Série** : trois affichages (Cartes, Liste, Grille), tri, filtres (possédées, manquantes, rareté), valeur de la série.
 - **Fiche carte** : grande image, niveau / coût / puissance / âme / triggers / traits, cote Cardmarket, prix minimum,
   moyennes 7 j et 30 j, **courbe de prix**, exemplaires (état, foil), prix d'achat, vue 3D, lien vers la version EN ↔ JP.
@@ -33,7 +33,7 @@ Aucune dépendance côté appli : HTML, CSS et JavaScript.
 |---|---|
 | `scripts/import-ws.mjs` | séries et cartes EN / JP → `data/catalog.json` (séries) + `data/cards-en.json`, `data/cards-ja.json`, liens Cardmarket |
 | `scripts/update-prices.mjs` | prix du jour → `data/prices.json` et historique → `data/history/<série>.json` (chargé à la demande) |
-| `scripts/make-scan-index.mjs` | empreintes du scanner → `data/scan/<édition>.json` (3000 nouvelles images au plus par passage) |
+| `scripts/make-scan-index.mjs` | empreintes du scanner → `data/scan/<édition>.json` (1500 nouvelles images au plus par passage, après la publication) |
 
 ## Mise en ligne (GitHub Pages)
 

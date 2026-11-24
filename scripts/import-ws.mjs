@@ -240,8 +240,15 @@ allSets.forEach((s, i) => {
 // (les séries sans nom dans la base portent leur code : on prend alors celui d'une autre série de la licence)
 const prints = new Set(allSets.map((x) => x.print));
 const named = (n) => !prints.has(n);
-const series = [...licences].map(([id, m]) => ({ id, name: [...m].sort((a, b) => named(b[0]) - named(a[0]) || b[1] - a[1] || a[0].length - b[0].length)[0][0] }));
-const licName = new Map(series.map((x) => [x.id, x.name]));
+// nom d'animé sans les mots de produit (« Booster Pack TV Anime “DANDADAN” » → « DANDADAN »)
+const animeName = (n) => {
+  let x = String(n).trim();
+  for (let i = 0; i < 3; i++) x = x.replace(/^\[[^\]]*\]\s*/, '').replace(/^(Premium |Extra |Meta |Power-?up )?(Booster|Trial Deck\+?|Starter Deck)( Pack| Set)?\s+/i, '').replace(/^(TV Anime|Anime|Movie|Theatrical Version|Theatrical Edition)\s+/i, '').trim();
+  x = x.replace(/^[“"「『](.+)[”"」』]$/, '$1').replace(/\s+(Vol\.?\s*\d+|Specials?)$/i, '').trim();
+  return x || String(n);
+};
+const series = [...licences].map(([id, m]) => ({ id, name: animeName([...m].sort((a, b) => named(b[0]) - named(a[0]) || b[1] - a[1] || a[0].length - b[0].length)[0][0]) }));
+const licName = new Map([...licences].map(([id, m]) => [id, [...m].sort((a, b) => named(b[0]) - named(a[0]) || b[1] - a[1])[0][0]]));
 for (const s of allSets) if (!named(s.name) && named(licName.get(s.block) ?? '')) s.name = licName.get(s.block);
 const clean = (c) => { const { _img, _code, ...rest } = c; return rest; };
 const generatedAt = new Date().toISOString();

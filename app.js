@@ -37,8 +37,9 @@ const TEXT = {
     sealedNote: (d) => `Prix tendance Cardmarket des produits scellés${d ? ` · mis à jour le ${d}` : ''}. Les produits sans prix n'ont pas encore de ventes.`,
     sealedCount: (n) => `${n} ${plural(n, 'produit scellé', 'produits scellés')}`,
     home: 'Accueil', collection: 'Collection', market: 'Cotes', wishlist: 'Souhaits', search: 'Recherche', searchCard: 'Rechercher une carte',
-    settings: 'Réglages', list: 'Liste', grid: 'Grille', cards: 'Cartes', searchSet: 'Rechercher une série', noSet: 'Aucune série trouvée', favorites: 'Favoris',
+    settings: 'Réglages', list: 'Liste', grid: 'Grille', cards: 'Cartes', searchSet: 'Rechercher un animé ou une série', noSet: 'Aucun animé ni série trouvé', favorites: 'Favoris',
     blocks: { new: 'Nouvelles séries', misc: 'Autres' },
+    an: { title: 'Animés', one: 'Animé', fav: 'Animé favori', chars: 'Personnages', allCards: 'Toutes les cartes de l\'animé', sets: (n) => `${n} série${n > 1 ? 's' : ''}`, cards: (n) => `${n} carte${n > 1 ? 's' : ''}` },
     back: 'Retour', favSet: 'Série favorite', changeSort: 'Changer le tri', filters: 'Filtres',
     owned: (a, b) => `${a}/${b} possédées`, myValue: 'Ma valeur', pricesSoon: 'Prix Cardmarket à venir',
     sorts: { num: 'Numéro', 'price-desc': 'Prix décroissant', 'price-asc': 'Prix croissant', name: 'Nom' },
@@ -276,8 +277,9 @@ const TEXT = {
     sealedNote: (d) => `Cardmarket trend prices for sealed products${d ? ` · updated ${d}` : ''}. Products without a price have no sales yet.`,
     sealedCount: (n) => `${n} sealed ${plural(n, 'product', 'products')}`,
     home: 'Home', collection: 'Collection', market: 'Market', wishlist: 'Wishlist', search: 'Search', searchCard: 'Search a card',
-    settings: 'Settings', list: 'List', grid: 'Grid', cards: 'Cards', searchSet: 'Search a set', noSet: 'No set found', favorites: 'Favourites',
+    settings: 'Settings', list: 'List', grid: 'Grid', cards: 'Cards', searchSet: 'Search an anime or a set', noSet: 'No anime or set found', favorites: 'Favourites',
     blocks: { new: 'New sets', misc: 'Other' },
+    an: { title: 'Anime', one: 'Anime', fav: 'Favourite anime', chars: 'Characters', allCards: 'All cards of this anime', sets: (n) => `${n} set${n > 1 ? 's' : ''}`, cards: (n) => `${n} card${n > 1 ? 's' : ''}` },
     back: 'Back', favSet: 'Favourite set', changeSort: 'Change sort', filters: 'Filters',
     owned: (a, b) => `${a}/${b} owned`, myValue: 'My value', pricesSoon: 'Cardmarket prices coming soon',
     sorts: { num: 'Number', 'price-desc': 'Price high to low', 'price-asc': 'Price low to high', name: 'Name' },
@@ -573,7 +575,7 @@ const FACTION = { Yellow: '#f5d142', Green: '#4fc26b', Red: '#ff5a5a', Blue: '#4
 
 // ---------- Stockage local (collection, souhaits, préférences) ----------
 const KEY = 'weissdex:v1';
-const defaults = () => ({ owned: {}, wish: [], fav: [], prefs: { lang: 'fr', homeMode: 'list', setMode: 'cards', sort: 'num', own: 'all', rarity: null, valueRange: 90 } });
+const defaults = () => ({ owned: {}, wish: [], fav: [], prefs: { lang: 'fr', homeMode: 'grid', setMode: 'cards', sort: 'num', own: 'all', rarity: null, valueRange: 90 } });
 function loadUser() {
   try {
     const raw = localStorage.getItem(KEY);
@@ -1056,32 +1058,101 @@ function renderExtra() {
     <p class="note">${L.ex.note}</p>
   </div>`;
 }
+// Accueil : un onglet par animé (licence), ses séries dans sa page ; les plus récents en tête
+// (plusieurs codes de licence peuvent porter le même nom : ils forment un seul animé)
+const animeOf = (s) => blockName(s.block ?? 'misc');
+function animeList() {
+  const map = new Map();
+  for (const s of catalog.sets) {
+    if (!setTotal(s)) continue; // séries vides dans cette édition : masquées
+    const k = animeOf(s);
+    if (!map.has(k)) map.set(k, { name: k, block: s.block, sets: [] });
+    map.get(k).sets.push(s);
+  }
+  for (const a of map.values()) {
+    a.sets.sort((x, y) => (y.order ?? 0) - (x.order ?? 0));
+    a.block = a.sets[0].block;
+    a.order = a.sets[0].order ?? 0;
+  }
+  return [...map.values()].sort((x, y) => y.order - x.order);
+}
+const animeProgress = (a) => { let own = 0, total = 0; for (const s of a.sets) { own += ownedIn(s.code); total += setTotal(s); } return { own, total, p: total ? own / total : 0 }; };
+function animeTile(a) {
+  const { own, total, p } = animeProgress(a);
+  return `<a class="anime-tile ${p >= 1 ? 'done' : ''}" href="#anime-${esc(a.block)}" ${artStyle(a.sets[0].code)}>
+    ${fav.has(`anime:${a.block}`) ? `<span class="fav-dot">${I.star}</span>` : ''}
+    <strong>${esc(a.name)}</strong>
+    <span class="anime-meta num"><span>${L.an.sets(a.sets.length)}</span><span><b>${own}</b>/${total}</span></span>
+    <div class="bar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>
+  </a>`;
+}
+function animeRow(a) {
+  const { own, total, p } = animeProgress(a);
+  return `<a class="set-row ${p >= 1 ? 'done' : ''}" href="#anime-${esc(a.block)}" ${artStyle(a.sets[0].code)}>
+    <div class="set-head"><span class="anime-count num">${L.an.sets(a.sets.length)}</span><span class="set-name">${esc(a.name)}</span>
+    <span class="set-count num">${own}<small>/${total}</small><b>${Math.floor(p * 100)} %</b></span></div>
+    <div class="bar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>
+  </a>`;
+}
 function renderHome() {
   homeTopbar(true);
   const mode = user.prefs.homeMode;
   const q = homeQuery.trim().toLowerCase();
   const hidden = catalog.sets.filter((s) => (cardsBySet.get(s.code) ?? []).length && !setTotal(s)).length;
-  const sets = [...catalog.sets]
-    .filter((s) => setTotal(s) > 0) // séries sans carte dans cette édition (ou encore vides dans la base) : masquées
-    .filter((s) => !q || [s.name, s.nameEn, s.nameJa, s.code, s.print, blockName(s.block)].some((x) => String(x ?? '').toLowerCase().includes(q)))
-    // ordre calculé à l'import (date Cardmarket ou numéro de sortie) : les plus récentes en tête
-    .sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
-  const groups = new Map();
-  const favSets = sets.filter((s) => fav.has(s.code));
-  if (favSets.length) groups.set(L.favorites, favSets);
-  for (const s of sets) { const b = blockName(s.block ?? 'new'); if (!groups.has(b)) groups.set(b, []); groups.get(b).push(s); }
-  const body = [...groups].map(([name, list], i) => `<details class="block" ${i < 3 || q ? 'open' : ''}>
-      <summary>${esc(name)}${I.chevron}</summary>
-      ${mode === 'grid' ? `<div class="set-tiles">${list.map(progressTile).join('')}</div>` : `<div class="set-list">${list.map(progressRow).join('')}</div>`}
-    </details>`).join('');
+  const all = animeList();
+  const hit = (x) => String(x ?? '').toLowerCase().includes(q);
+  const animes = q ? all.filter((a) => hit(a.name) || a.sets.some((s) => [s.name, s.code, s.print].some(hit))) : all;
+  const setHits = q ? all.flatMap((a) => a.sets).filter((s) => [s.name, s.code, s.print].some(hit)).slice(0, 30) : [];
+  const favSets = all.flatMap((a) => a.sets).filter((s) => fav.has(s.code));
+  const favAnimes = animes.filter((a) => fav.has(`anime:${a.block}`));
+  const grid = (list) => (mode === 'grid' ? `<div class="anime-grid">${list.map(animeTile).join('')}</div>` : `<div class="set-list">${list.map(animeRow).join('')}</div>`);
+  const sets = (list) => (mode === 'grid' ? `<div class="set-tiles">${list.map(progressTile).join('')}</div>` : `<div class="set-list">${list.map(progressRow).join('')}</div>`);
   view.innerHTML = `<div class="stack">
     ${installBanner()}
     ${homeTabs('home')}
     <input class="search" id="setSearch" type="search" placeholder="${L.searchSet}" value="${esc(homeQuery)}" autocomplete="off">
-    ${body || `<div class="empty"><strong>${L.noSet}</strong></div>`}
+    ${!q && (favAnimes.length || favSets.length) ? `<details class="block" open><summary>${L.favorites}${I.chevron}</summary>${favAnimes.length ? grid(favAnimes) : ''}${favSets.length ? sets(favSets) : ''}</details>` : ''}
+    ${animes.length ? `<h2 class="section-title">${L.an.title} <small class="num">${animes.length}</small></h2>${grid(animes)}` : ''}
+    ${setHits.length ? `<h2 class="section-title">${L.setsTab}</h2>${sets(setHits)}` : ''}
+    ${!animes.length && !setHits.length ? `<div class="empty"><strong>${L.noSet}</strong></div>` : ''}
     ${hidden ? `<p class="note lang-note">${L.hiddenSets(hidden, cardLang)} <button class="link-btn" data-action="cardlang">${L.showOther(LANG_TAG[nextLang(cardLang)])}</button></p>` : ''}
   </div>`;
 }
+// page d'un animé : ses séries (sous-onglet Séries) et ses personnages (sous-onglet Personnages)
+let animeTab = 'sets', animeBlock = null;
+function renderAnime(block) {
+  const name = blockName(block);
+  const a = animeList().find((x) => x.name === name);
+  if (!a) { location.hash = '#home'; return; }
+  const { own, total, p } = animeProgress(a);
+  const key = `anime:${a.block}`;
+  const mode = user.prefs.homeMode;
+  setTopbar(`<a class="icon-btn" href="#home" aria-label="${L.back}">${I.back}</a><h1 class="small">${esc(a.name)}</h1>
+    <button class="icon-btn ${fav.has(key) ? 'on' : ''}" data-fav="${esc(key)}" aria-pressed="${fav.has(key)}" aria-label="${L.an.fav}">${I.star}</button>
+    <button class="icon-btn" data-action="home-mode" aria-label="${L.toggleView}">${mode === 'grid' ? I.listIcon : I.gridIcon}</button>${langBtn()}`);
+  const blocks = new Set(a.sets.map((s) => s.block));
+  const chars = allLists().filter((x) => x.group === 'character' && blocks.has(x.lic)).map((x) => [x, cardsLen(x)]).filter(([, n]) => n >= CHAR_MIN).sort((x, y) => y[1] - x[1]);
+  const lic = allLists().filter((x) => x.group === 'licence' && blocks.has(x.lic) && cardsLen(x));
+  if (animeTab === 'chars' && !chars.length) animeTab = 'sets';
+  view.innerHTML = `<div class="stack">
+    <div class="set-hero" ${artStyle(a.sets[0].code)}>
+      <div class="set-hero-text"><span class="title-code">${L.an.one}</span><h2>${esc(a.name)}</h2><small>${L.an.sets(a.sets.length)} · ${L.an.cards(total)}</small></div>
+      <div class="set-hero-prog num"><b>${Math.floor(p * 100)} %</b><span>${own}/${total}</span></div>
+      <div class="bar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>
+    </div>
+    <div class="seg" role="tablist">${[['sets', `${L.setsTab} (${a.sets.length})`], ...(chars.length ? [['chars', `${L.an.chars} (${chars.length})`]] : [])].map(([k, l]) => `<button data-anime-tab="${k}" aria-pressed="${animeTab === k}">${l}</button>`).join('')}</div>
+    ${animeTab === 'chars'
+      ? `<div class="chips wrap">${chars.map(([x, n]) => `<a class="chip" href="#list-${esc(x.id)}">${esc(listTitle(x))} <small class="num">${n}</small></a>`).join('')}</div>`
+      : mode === 'grid' ? `<div class="set-tiles">${a.sets.map(progressTile).join('')}</div>` : `<div class="set-list">${a.sets.map(progressRow).join('')}</div>`}
+    ${lic.map((x) => `<a class="btn-ghost" style="text-align:center;text-decoration:none" href="#list-${esc(x.id)}">${L.an.allCards}${lic.length > 1 ? ` · ${esc(x.lic)}` : ''} (${cardsLen(x)})</a>`).join('')}
+  </div>`;
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-anime-tab]');
+  if (!b) return;
+  animeTab = b.dataset.animeTab;
+  currentRender();
+});
 
 let showFilters = false;
 const SORTS = ['num', 'price-desc', 'price-asc', 'name'];
@@ -1129,7 +1200,7 @@ function renderSet(code) {
   const value = all.reduce((a, c) => a + qty(c.id) * (price(c.id) ?? 0), 0);
   const full = all.reduce((a, c) => a + (price(c.id) ?? 0), 0);
   const isFiltered = user.prefs.own !== 'all' || user.prefs.rarity;
-  setTopbar(`<a class="icon-btn" href="#home" aria-label="${L.back}">${I.back}</a>
+  setTopbar(`<a class="icon-btn" href="#anime-${esc(s.block)}" aria-label="${L.back}">${I.back}</a>
     <h1 class="small"><span class="title-code">${esc(setPrint(s))}</span>${esc(setName(s))}</h1>
     <button class="icon-btn ${fav.has(code) ? 'on' : ''}" data-fav="${esc(code)}" aria-pressed="${fav.has(code)}" aria-label="${L.favSet}">${I.star}</button>
     <button class="icon-btn" data-action="cycle-sort" aria-label="${L.changeSort}">${I.sort}</button>
@@ -4811,6 +4882,7 @@ function route() {
   if (!sheet.hidden) closeCard();
   let tab = h;
   if (h.startsWith('set-')) { tab = 'home'; currentRender = () => renderSet(h.slice(4)); }
+  else if (h.startsWith('anime-')) { tab = 'home'; const b = decodeURIComponent(h.slice(6)); if (animeBlock !== b) { animeBlock = b; animeTab = 'sets'; } currentRender = () => renderAnime(b); }
   else if (h === 'collection') currentRender = renderCollection;
   else if (h === 'graded') { tab = 'collection'; currentRender = renderGraded; }
   else if (h === 'leaderboard') { tab = 'collection'; lb.rows = null; currentRender = renderLeaderboard; }

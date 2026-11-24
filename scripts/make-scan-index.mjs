@@ -3,7 +3,7 @@
 // Le calcul (moyenne par case sur une image ramenée à 90 × 120) est le même que dans app.js (scanFeature).
 // Incrémental et limité : au plus --limit nouvelles images par passage (vignettes de 200 px via wsrv.nl, sinon l'image
 // officielle), pour ne pas surcharger les serveurs ; la suite est faite aux passages suivants (chaque lundi).
-// Usage : node scripts/make-scan-index.mjs [--limit 3000]
+// Usage : node scripts/make-scan-index.mjs [--limit 1500] [--minutes 25]
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -26,7 +26,10 @@ export function boxFeature(px, ch, x = 0, y = 0, w = RW, h = RH) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const args = process.argv.slice(2);
-  const limit = Number(args[args.indexOf('--limit') + 1]) || 3000;
+  const limit = Number(args[args.indexOf('--limit') + 1]) || 1500;
+  // temps maximal : on s'arrête proprement et on enregistre ce qui est fait
+  const minutes = Number(args[args.indexOf('--minutes') + 1]) || 25;
+  const stopAt = Date.now() + minutes * 60000;
   const catalog = JSON.parse(readFileSync(join(root, 'data/catalog.json'), 'utf8'));
   const config = JSON.parse(readFileSync(join(root, 'data/config.json'), 'utf8'));
   const sets = new Map(catalog.sets.map((s) => [s.code, s]));
@@ -51,12 +54,12 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     const todo = cards.filter((c) => !have.has(c.id) && imageOf(c)).sort((a, b) => (sets.get(b.set)?.order ?? 0) - (sets.get(a.set)?.order ?? 0));
     let i = 0;
     await Promise.all(Array.from({ length: 4 }, async () => {
-      while (i < todo.length && fetched < limit) {
+      while (i < todo.length && fetched < limit && Date.now() < stopAt) {
         const c = todo[i++];
         const u = imageOf(c);
         for (const url of [thumb ? thumb.replace('{url}', encodeURIComponent(u.replace(/^https?:\/\//, ''))).replace('{w}', 200) : null, u].filter(Boolean)) {
           try {
-            const r = await fetch(url, { headers: { 'user-agent': 'WeissDex scanner index (collection tracker)' } });
+            const r = await fetch(url, { headers: { 'user-agent': 'WeissDex scanner index (collection tracker)' }, signal: AbortSignal.timeout(15000) });
             if (!r.ok) continue;
             const buf = Buffer.from(await r.arrayBuffer());
             have.set(c.id, Buffer.from(boxFeature(await raw90(buf), 3)).toString('base64'));
