@@ -446,7 +446,7 @@ button:disabled { opacity: .5; cursor: default; }
   display: flex; align-items: center; gap: 10px; padding: 4px 12px 26px;
   font: 700 23px/1 var(--font-display); letter-spacing: .02em; color: var(--fg);
 }
-:root[data-device="pc"] .tabbar .brand svg { width: 34px; height: 34px; stroke: none; }
+:root[data-device="pc"] .tabbar .brand svg, :root[data-device="pc"] .tabbar .brand img { width: 34px; height: 34px; stroke: none; }
 :root[data-device="pc"] .tabbar a,
 :root[data-device="pc"] .tabbar .tab-main {
   display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 14px;

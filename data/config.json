@@ -20,5 +20,8 @@
       "ja": 7
     }
   },
-  "admins": []
+  "admins": [],
+  "cardBacks": {
+    "normal": "icons/card-back.jpg"
+  }
 }
