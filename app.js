@@ -52,8 +52,8 @@ const TEXT = {
     kCards: 'Cartes', kUnique: 'Uniques', kValue: 'Valeur', all: 'Toutes',
     emptyWish: 'Aucune carte en souhait', emptyWishHint: 'Touchez le cœur d\'une carte pour l\'ajouter ici et suivre son prix.',
     wishBudget: 'Budget pour compléter mes souhaits', wishNote: (n, m) => `${n} ${plural(n, 'carte', 'cartes')} à acheter sur ${m}, au prix tendance Cardmarket.`,
-    searchPh: 'Nom de carte ou numéro (ex. Dracaufeu, 151 006)', searchHint: (n, m) => `${n} cartes dans ${m} séries. Tapez au moins 2 lettres.`,
-    results: (n) => `${n} ${plural(n, 'résultat', 'résultats')}`, noResult: 'Aucune carte trouvée',
+    searchPh: 'Nom de carte ou numéro (ex. Rem, 5HY/W83-E001)', searchHint: (n, m) => `${n} cartes dans ${m} séries. Tapez au moins 2 lettres.`,
+    results: (n) => `${n} ${plural(n, 'résultat', 'résultats')}`, noResult: 'Aucune carte trouvée', otherResults: (n, l) => `${n} ${plural(n, 'carte', 'cartes')} en ${l} : voir l'édition ${l}`,
     valuesAll: 'Valeur totale : vos cartes FR, EN et JP comptées ensemble.',
     valuesLists: (l) => `Listes ci-dessous : cartes de l'édition ${LANG_TAG[l]} (bouton EN | JP pour changer).`,
     colValue: 'Valeur de ma collection', colValueHint: 'Marquez des cartes comme possédées pour suivre la valeur de votre collection dans le temps.',
@@ -210,7 +210,7 @@ const TEXT = {
     fr: {
       title: 'Amis', gate: 'Connecte-toi à ton compte WeissDex pour ajouter des amis et voir leurs collections.',
       choose: 'Choisis ton pseudo', chooseHint: 'Tes amis t\'ajouteront avec ce pseudo. 3 à 20 caractères : lettres minuscules, chiffres, . _ -',
-      pseudoPh: 'ex. dresseur_77', save: 'Enregistrer', pseudoRule: 'Pseudo invalide : 3 à 20 caractères (a-z, 0-9, . _ -).', pseudoTaken: 'Ce pseudo est déjà pris, essaie-en un autre.', pseudoSaved: 'Pseudo enregistré',
+      pseudoPh: 'ex. oshi_77', save: 'Enregistrer', pseudoRule: 'Pseudo invalide : 3 à 20 caractères (a-z, 0-9, . _ -).', pseudoTaken: 'Ce pseudo est déjà pris, essaie-en un autre.', pseudoSaved: 'Pseudo enregistré',
       add: 'Ajouter un ami', yourPseudo: 'Ton pseudo :', addPh: 'Pseudo de ton ami', send: 'Envoyer',
       privacy: 'Tes amis acceptés peuvent voir ta collection et tes souhaits. Personne d\'autre.',
       notFound: (p) => `Aucun compte avec le pseudo « ${p} ».`, self: 'C\'est ton propre pseudo !', already: (p) => `@${p} est déjà ton ami.`,
@@ -292,8 +292,8 @@ const TEXT = {
     kCards: 'Cards', kUnique: 'Unique', kValue: 'Value', all: 'All',
     emptyWish: 'Your wishlist is empty', emptyWishHint: 'Tap the heart on a card to add it here and follow its price.',
     wishBudget: 'Budget to complete my wishlist', wishNote: (n, m) => `${n} ${plural(n, 'card', 'cards')} to buy out of ${m}, at Cardmarket trend price.`,
-    searchPh: 'Card name or number (e.g. Charizard, 151 006)', searchHint: (n, m) => `${n} cards in ${m} sets. Type at least 2 letters.`,
-    results: (n) => `${n} ${plural(n, 'result', 'results')}`, noResult: 'No card found',
+    searchPh: 'Card name or number (e.g. Rem, 5HY/W83-E001)', searchHint: (n, m) => `${n} cards in ${m} sets. Type at least 2 letters.`,
+    results: (n) => `${n} ${plural(n, 'result', 'results')}`, noResult: 'No card found', otherResults: (n, l) => `${n} ${plural(n, 'card', 'cards')} in ${l}: see the ${l} edition`,
     valuesAll: 'Total value: your FR, EN and JP cards counted together.',
     valuesLists: (l) => `Lists below: ${LANG_TAG[l]} edition cards (EN | JP button to switch).`,
     colValue: 'My collection value', colValueHint: 'Mark cards as owned to follow the value of your collection over time.',
@@ -450,7 +450,7 @@ const TEXT = {
     fr: {
       title: 'Friends', gate: 'Sign in to your WeissDex account to add friends and see their collections.',
       choose: 'Choose your username', chooseHint: 'Friends will add you with this username. 3 to 20 characters: lowercase letters, digits, . _ -',
-      pseudoPh: 'e.g. trainer_77', save: 'Save', pseudoRule: 'Invalid username: 3 to 20 characters (a-z, 0-9, . _ -).', pseudoTaken: 'This username is taken, try another one.', pseudoSaved: 'Username saved',
+      pseudoPh: 'e.g. oshi_77', save: 'Save', pseudoRule: 'Invalid username: 3 to 20 characters (a-z, 0-9, . _ -).', pseudoTaken: 'This username is taken, try another one.', pseudoSaved: 'Username saved',
       add: 'Add a friend', yourPseudo: 'Your username:', addPh: 'Your friend\'s username', send: 'Send',
       privacy: 'Accepted friends can see your collection and wishlist. Nobody else.',
       notFound: (p) => `No account with the username “${p}”.`, self: 'That\'s your own username!', already: (p) => `@${p} is already your friend.`,
@@ -1188,9 +1188,11 @@ function cardsBlock(list, mode) {
 // recherche dans une série : nom FR/EN, numéro, rareté (sans accents ni majuscules)
 let setQuery = '', setQueryCode = '';
 const fold = (t) => String(t ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+// nom de la même carte dans l'autre édition (une carte japonaise se trouve aussi avec son nom anglais)
+const twinName = (c) => (isSealed(c) || isExtra(c) || !c.languages ? '' : cardsById.get(twinId(c))?.name ?? '');
 function matchQuery(c, q) {
   if (!q) return true;
-  const hay = fold([c.name, c.nameEn, c.nameJa, c.number, rarityLabel(c.rarity), typeLabel(c.type)].join(' '));
+  const hay = fold([c.name, c.nameEn, c.nameJa, twinName(c), c.number, rarityLabel(c.rarity), typeLabel(c.type)].join(' '));
   return fold(q).split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
 }
 function renderSet(code) {
@@ -1334,12 +1336,15 @@ let searchQuery = '';
 function renderSearch() {
   setTopbar(`<h1>${L.search}</h1><button class="chip scan-chip" data-action="scan">${I.camera}<span>${L.scan.btn}</span></button>`);
   const q = searchQuery.trim().toLowerCase();
-  const res = q.length < 2 ? [] : allItems().filter(inCardLang).filter((c) => [c.name, c.nameEn, c.nameJa, `${itemCode(c)} ${c.number ?? ''}`, `${c.set} ${c.number ?? ''}`].some((x) => String(x ?? '').toLowerCase().includes(q)));
+  const hit = (c) => [c.name, c.nameEn, c.nameJa, twinName(c), `${itemCode(c)} ${c.number ?? ''}`, `${c.set} ${c.number ?? ''}`].some((x) => String(x ?? '').toLowerCase().includes(q));
+  const res = q.length < 2 ? [] : allItems().filter(inCardLang).filter(hit);
+  // rien dans cette édition : combien dans l'autre ?
+  const other = q.length < 2 || res.length ? 0 : allItems().filter((c) => !inCardLang(c) && hit(c)).length;
   view.innerHTML = `<div class="stack">
     <input class="search" id="cardSearch" type="search" placeholder="${L.searchPh}" value="${esc(searchQuery)}" autocomplete="off">
     <div id="searchResults">${q.length < 2 ? `<p class="note">${L.searchHint(catalog.cards.length, catalog.sets.length)}</p>`
       : res.length ? `<p class="note">${L.results(res.length)}</p><div class="rows">${sortCards(res, 'price-desc').slice(0, 150).map((c) => cardRow(c)).join('')}</div>`
-      : `<div class="empty"><strong>${L.noResult}</strong></div>`}</div>
+      : `<div class="empty"><strong>${L.noResult}</strong>${other ? `<button class="btn-ghost" data-action="cardlang">${L.otherResults(other, LANG_TAG[nextLang(cardLang)])}</button>` : ''}</div>`}</div>
   </div>`;
 }
 
