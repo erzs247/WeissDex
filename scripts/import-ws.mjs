@@ -42,9 +42,16 @@ console.log(`${raw.length} cartes dans la base.`);
 const offPath = join(root, 'data/official-en.json');
 let officialNames = {};
 if (existsSync(offPath)) {
-  officialNames = JSON.parse(readFileSync(offPath, 'utf8')).names ?? {};
+  const off = JSON.parse(readFileSync(offPath, 'utf8'));
+  officialNames = { ...(off.names ?? {}) };
+  // extensions lues en entier sur le site officiel : leur nom le plus fréquent
+  const counts = new Map();
+  for (const c of Object.values(off.cards ?? {})) { const k = `${c.expansion_id}\t${c.expansion}`; counts.set(k, (counts.get(k) ?? 0) + 1); }
+  const best = new Map();
+  for (const [k, n] of counts) { const [id, name] = k.split('\t'); if (!best.has(id) || best.get(id)[1] < n) best.set(id, [name, n]); }
+  for (const [id, [name]] of best) if (name) officialNames[id] = name;
   const known = new Set(raw.map((r) => r.code));
-  const extra = Object.values(JSON.parse(readFileSync(offPath, 'utf8')).cards ?? {}).filter((c) => !known.has(c.code));
+  const extra = Object.values(off.cards ?? {}).filter((c) => !known.has(c.code));
   for (const c of extra) raw.push({ ...c, _official: true });
   console.log(`${extra.length} cartes ajoutées depuis le site officiel.`);
 }
