@@ -1,0 +1,146 @@
+rules_version = '2';
+// Règles de sécurité Firestore de WeissDex (projet Firebase propre à WeissDex).
+// À coller dans la console Firebase : Firestore Database → Règles → Publier.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isMe(uid) { return signedIn() && request.auth.uid == uid; }
+    // un ami accepté de <owner> figure dans friends/<owner>/list/<son uid>
+    function isFriendOf(owner) { return signedIn() && exists(/databases/$(database)/documents/friends/$(owner)/list/$(request.auth.uid)); }
+    // administrateurs de WeissDex (gèrent les soutiens depuis l'appli) : ajouter ici ton ID WeissDex (Mon compte → Ton ID),
+    // le même que dans data/config.json → "admins"
+    function isAdmin() { return signedIn() && request.auth.uid in []; }
+
+    // collection de chaque compte : écrite par son propriétaire, lue par lui et ses amis acceptés
+    match /users/{uid} {
+      allow read: if isMe(uid) || isFriendOf(uid);
+      allow delete: if isMe(uid);
+      allow create, update: if isMe(uid)
+        && request.resource.data.keys().hasOnly(['owned', 'wish', 'fav', 'app', 'v', 'updatedAt'])
+        && request.resource.data.owned is map
+        && request.resource.data.wish is list
+        && request.resource.data.fav is list;
+    }
+
+    // cartes gradées (slabs), ventes relevées, prix d'achat, état des exemplaires et alertes prix : écrites par le propriétaire, lues par lui et ses amis
+    match /graded/{uid} {
+      allow read: if isMe(uid) || isFriendOf(uid);
+      allow delete: if isMe(uid);
+      allow create, update: if isMe(uid)
+        && request.resource.data.keys().hasOnly(['items', 'sales', 'paid', 'copies', 'alerts', 'wlists', 'proofs', 'cardProofs', 'binders', 'updatedAt'])
+        && request.resource.data.items is list
+        && request.resource.data.items.size() <= 2000
+        && request.resource.data.sales is map;
+    }
+    // photos des slabs (une par document, image réduite)
+    match /gphotos/{uid}/items/{g} {
+      allow read: if isMe(uid) || isFriendOf(uid);
+      allow delete: if isMe(uid);
+      allow create, update: if isMe(uid)
+        && request.resource.data.keys().hasOnly(['img'])
+        && request.resource.data.img is string
+        && request.resource.data.img.size() < 400000;
+    }
+
+    // decks personnalisés : écrits par le propriétaire, lus par lui et ses amis
+    match /decks/{uid} {
+      allow read: if isMe(uid) || isFriendOf(uid);
+      allow delete: if isMe(uid);
+      allow create, update: if isMe(uid)
+        && request.resource.data.keys().hasOnly(['list', 'gone', 'updatedAt'])
+        && request.resource.data.list is list
+        && request.resource.data.list.size() <= 300;
+    }
+
+    // decks partagés avec un code (6 lettres/chiffres) : lisibles par tout compte connecté, gérés par leur auteur
+    match /sharedDecks/{code} {
+      allow read: if signedIn();
+      allow create: if signedIn() && code.matches('^[A-Z0-9]{6}$')
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['name', 'legends', 'main', 'side', 'by', 'uid', 'at', 'v'])
+        && request.resource.data.main is map;
+      allow update: if signedIn() && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // classement mondial (sur inscription) : chacun écrit seulement sa ligne, avec son vrai pseudo ; un admin peut retirer une ligne
+    match /leaderboard/{uid} {
+      allow read: if signedIn();
+      allow delete: if isMe(uid) || isAdmin();
+      allow create, update: if isMe(uid)
+        && request.resource.data.keys().hasOnly(['pseudo', 'cards', 'unique', 'value', 'sets', 'verified', 'vsets', 'updatedAt'])
+        && request.resource.data.pseudo == get(/databases/$(database)/documents/publicProfiles/$(uid)).data.pseudo
+        && request.resource.data.cards is int && request.resource.data.unique is int && request.resource.data.value is number
+        && request.resource.data.verified is list && request.resource.data.verified.size() <= 200
+        && request.resource.data.vsets == request.resource.data.verified.size();
+    }
+    // photos de vérification des séries complètes (carte la plus chère, prise en direct)
+    match /proofs/{uid}/cards/{card} {
+      allow read: if signedIn();
+      allow delete: if isMe(uid) || isAdmin();
+      allow create, update: if isMe(uid)
+        && request.resource.data.keys().hasOnly(['img', 'card', 'at'])
+        && request.resource.data.img is string && request.resource.data.img.size() < 150000;
+    }
+    match /proofs/{uid}/sets/{code} {
+      allow read: if signedIn();
+      allow delete: if isMe(uid) || isAdmin();
+      allow create, update: if isMe(uid)
+        && request.resource.data.keys().hasOnly(['img', 'card', 'at'])
+        && request.resource.data.img is string && request.resource.data.img.size() < 150000;
+    }
+
+    // statut de soutien : lisible par le compte ; activé ou retiré uniquement par un administrateur (ou la console)
+    match /supporters/{uid} {
+      allow read: if isMe(uid) || isAdmin();
+      allow delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['active', 'since'])
+        && request.resource.data.active is bool;
+    }
+
+    // photo et bannière de profil : visibles par le compte et ses amis, réservées aux soutiens actifs ; un admin peut les retirer
+    match /profiles/{uid} {
+      allow read: if isMe(uid) || isFriendOf(uid);
+      allow delete: if isMe(uid) || isAdmin();
+      allow create, update: if isMe(uid)
+        && get(/databases/$(database)/documents/supporters/$(uid)).data.active == true
+        && request.resource.data.keys().hasOnly(['avatar', 'banner', 'updatedAt']);
+    }
+
+    // pseudos uniques : handles/<pseudo> → { uid }
+    match /handles/{pseudo} {
+      allow read: if signedIn();
+      allow create: if signedIn() && pseudo.matches('^[a-z0-9_.-]{3,20}$')
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // profil public (pseudo seulement), doit correspondre à un pseudo réservé par le compte
+    match /publicProfiles/{uid} {
+      allow read: if signedIn();
+      allow delete: if isMe(uid);
+      allow create, update: if isMe(uid)
+        && request.resource.data.keys().hasOnly(['pseudo'])
+        && getAfter(/databases/$(database)/documents/handles/$(request.resource.data.pseudo)).data.uid == uid;
+    }
+
+    // demandes d'ami : friendRequests/<destinataire>/from/<expéditeur>
+    match /friendRequests/{to}/from/{from} {
+      allow read, delete: if isMe(to) || isMe(from);
+      allow create: if isMe(from) && from != to
+        && request.resource.data.keys().hasOnly(['pseudo', 'at'])
+        && request.resource.data.pseudo == get(/databases/$(database)/documents/publicProfiles/$(from)).data.pseudo;
+    }
+
+    // amitiés : créées des deux côtés par celui qui accepte une demande existante
+    match /friends/{owner}/list/{friend} {
+      allow read, delete: if isMe(owner) || isMe(friend);
+      allow create: if signedIn() && request.resource.data.keys().hasOnly(['since']) && (
+        (isMe(owner) && exists(/databases/$(database)/documents/friendRequests/$(owner)/from/$(friend)))
+        || (isMe(friend) && exists(/databases/$(database)/documents/friendRequests/$(friend)/from/$(owner))));
+    }
+  }
+}

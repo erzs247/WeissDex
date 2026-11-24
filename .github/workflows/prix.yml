@@ -1,0 +1,104 @@
+name: Prix Cardmarket, nouveautés et publication
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # chaque jour vers 7 h (heure de Paris en hiver) : prix du jour
+    - cron: "47 5 * * 1"   # chaque lundi vers 6 h 45 : nouvelles séries et cartes (WS Lounge)
+  workflow_dispatch:
+    inputs:
+      nouveautes:
+        description: "Chercher aussi les nouvelles séries et cartes (WS Lounge)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  nouveautes:
+    # le lundi, à la demande, ou tant que la base est vide (premier lancement)
+    if: github.event.schedule == '47 5 * * 1' || inputs.nouveautes == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Séries et cartes WS Lounge (EN, JP) + liens Cardmarket
+        run: node scripts/import-ws.mjs
+      - name: Accès aux images (site officiel et vignettes)
+        continue-on-error: true
+        run: |
+          {
+            echo "### Images"
+            for u in "https://ws-tcg.com/wordpress/wp-content/images/cardlist/5/5hy_w83/5hy_w83_001.png" \
+                     "https://en.ws-tcg.com/wordpress/wp-content/images/cardimages/5HY/BP/5HY_W83_E001.png" \
+                     "https://wsrv.nl/?url=ws-tcg.com/wordpress/wp-content/images/cardlist/5/5hy_w83/5hy_w83_001.png&w=300&output=webp"; do
+              echo "- $(curl -s -o /dev/null -w '%{http_code} %{content_type} %{size_download} octets' -H 'Referer: https://erzs247.github.io/' "$u") : $u"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Empreintes du scanner (nouvelles cartes, 3000 au plus par passage)
+        timeout-minutes: 40
+        run: node scripts/make-scan-index.mjs --limit 3000 || echo "Scanner reporte a la semaine prochaine"
+      - name: Enregistrer les nouveautés
+        run: |
+          git config user.name "weissdex-bot"
+          git config user.email "weissdex-bot@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "Nouveautés du $(date +%F)"
+          git push
+
+  prix:
+    needs: [nouveautes]
+    if: always() && github.event_name != 'push' && needs.nouveautes.result != 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Relevé des prix Cardmarket du jour
+        run: |
+          if [ -f data/catalog.json ]; then node scripts/update-prices.mjs; else echo "Pas encore de cartes : lancer avec « nouveautés »"; fi
+      - name: Enregistrer l'historique
+        run: |
+          git config user.name "weissdex-bot"
+          git config user.email "weissdex-bot@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "Prix Cardmarket du $(date +%F)"
+          git push
+
+  publier:
+    needs: [prix]
+    if: always() && (needs.prix.result == 'success' || needs.prix.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: .
+      - name: Laisser GitHub enregistrer l'archive
+        run: sleep 30
+      - id: deploy
+        uses: actions/deploy-pages@v4

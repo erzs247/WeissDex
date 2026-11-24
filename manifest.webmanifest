@@ -1,0 +1,34 @@
+{
+  "id": "./",
+  "name": "WeissDex – Collection Weiss Schwarz",
+  "short_name": "WeissDex",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0c1022",
+  "theme_color": "#0c1022",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "description": "Suivi de collection Weiss Schwarz (EN, JP) : cartes, prix Cardmarket, classeurs et amis.",
+  "categories": [
+    "entertainment",
+    "utilities"
+  ]
+}

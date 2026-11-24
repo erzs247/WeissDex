@@ -1,0 +1,24 @@
+{
+  "appName": "WeissDex",
+  "source": {
+    "name": "WS Lounge",
+    "repo": "https://github.com/gabrielcpws-ctrl/ws_lounge_db",
+    "license": "CC0-1.0"
+  },
+  "images": {
+    "note": "Vignettes réduites par wsrv.nl (service d'images libre) ; mettre \"thumb\": \"\" pour n'utiliser que les images officielles.",
+    "thumb": "https://wsrv.nl/?url={url}&w={w}&output=webp&q=80"
+  },
+  "cardmarket": {
+    "gameSlug": "WeissSchwarz",
+    "idGame": 10,
+    "productsUrl": "https://downloads.s3.cardmarket.com/productCatalog/productList/products_singles_{idGame}.json",
+    "priceGuideUrl": "https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_{idGame}.json",
+    "languageIds": {
+      "en": 1,
+      "fr": 2,
+      "ja": 7
+    }
+  },
+  "admins": []
+}

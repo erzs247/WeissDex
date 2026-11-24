@@ -1,0 +1,16 @@
+{
+  "name": "weissdex",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Suivi de collection Weiss Schwarz (EN, JP) avec prix Cardmarket et courbes de prix",
+  "type": "module",
+  "scripts": {
+    "start": "npx --yes serve -l 8080 .",
+    "import-ws": "node scripts/import-ws.mjs",
+    "update": "node scripts/update-prices.mjs",
+    "scan": "node scripts/make-scan-index.mjs"
+  },
+  "dependencies": {
+    "sharp": "^0.33.5"
+  }
+}

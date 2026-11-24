@@ -1,0 +1,5221 @@
+// WeissDex : suivi de collection Weiss Schwarz (cartes, prix Cardmarket, courbes de prix) : éditions anglaise et japonaise.
+// Base de cartes : WS Lounge (base ouverte, licence CC0) ; images affichées depuis les listes officielles ws-tcg.com / en.ws-tcg.com
+// (vignettes réduites par wsrv.nl, image d'origine en secours).
+// Aucune dépendance : HTML + CSS + ce module. Les données viennent de data/*.json.
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const parseDay = (s) => new Date(`${s}T00:00:00`);
+
+// ---------- Détection de l'appareil : interface PC ou téléphone ----------
+// « PC » = grand écran avec souris ou pavé tactile, ou très grand écran (tablette en paysage, TV…).
+// On se base sur l'écran et le pointeur plutôt que sur le nom de l'appareil : c'est plus fiable,
+// et l'interface bascule en direct si la fenêtre est redimensionnée ou l'écran tourné.
+const pcQuery = matchMedia('(min-width: 1024px) and (hover: hover) and (pointer: fine), (min-width: 1280px)');
+const isPC = () => pcQuery.matches;
+const applyDevice = () => { document.documentElement.dataset.device = isPC() ? 'pc' : 'mobile'; };
+applyDevice();
+
+// ---------- Textes FR / EN ----------
+const plural = (n, one, many) => (n > 1 ? many : one);
+// éditions des cartes : anglaise et japonaise (chacune a ses séries, ses cartes et sa collection)
+const CARD_LANGS = ['en', 'ja'];
+const LANG_TAG = { fr: 'FR', en: 'EN', ja: 'JP' };
+const LANG_FR = { fr: 'français', en: 'anglais', ja: 'japonais' };
+const LANG_EN = { fr: 'French', en: 'English', ja: 'Japanese' };
+// fonctions reprises de WeissDex mais en veille au début : créateur de decks (règles Weiss Schwarz à faire : 50 cartes,
+// 4 exemplaires max, 8 climax max), compagnon Capri ; actualités et scellé s'affichent dès que data/news.json et data/sealed.json ont du contenu
+const DECKS_ON = false;
+// Comptes : projet Firebase propre à WeissDex (data/firebase.json), séparé de WeissDex et de WeissDex
+const COL = { users: 'users', graded: 'graded', gphotos: 'gphotos', decks: 'decks', sharedDecks: 'sharedDecks', leaderboard: 'leaderboard', proofs: 'proofs' };
+const PET_ON = false;
+const nextLang = (l) => CARD_LANGS[(CARD_LANGS.indexOf(l) + 1) % CARD_LANGS.length];
+const TEXT = {
+  fr: {
+    sealed: 'Scellé', setsTab: 'Séries', toggleView: 'Changer l\'affichage',
+    cats: { booster: 'Boosters', box: 'Booster Box', case: 'Cases de 6 Booster Box', deck: 'Decks', kit: 'Kits & coffrets' },
+    catOne: { booster: 'Booster', box: 'Booster Box', case: 'Case de 6 Booster Box', deck: 'Deck', kit: 'Kit' },
+    sealedNote: (d) => `Prix tendance Cardmarket des produits scellés${d ? ` · mis à jour le ${d}` : ''}. Les produits sans prix n'ont pas encore de ventes.`,
+    sealedCount: (n) => `${n} ${plural(n, 'produit scellé', 'produits scellés')}`,
+    home: 'Accueil', collection: 'Collection', market: 'Cotes', wishlist: 'Souhaits', search: 'Recherche', searchCard: 'Rechercher une carte',
+    settings: 'Réglages', list: 'Liste', grid: 'Grille', cards: 'Cartes', searchSet: 'Rechercher une série', noSet: 'Aucune série trouvée', favorites: 'Favoris',
+    blocks: { new: 'Nouvelles séries', misc: 'Autres' },
+    back: 'Retour', favSet: 'Série favorite', changeSort: 'Changer le tri', filters: 'Filtres',
+    owned: (a, b) => `${a}/${b} possédées`, myValue: 'Ma valeur', pricesSoon: 'Prix Cardmarket à venir',
+    sorts: { num: 'Numéro', 'price-desc': 'Prix décroissant', 'price-asc': 'Prix croissant', name: 'Nom' },
+    ownF: { all: 'Toutes', owned: 'Possédées', missing: 'Manquantes' }, allRarities: 'Toutes raretés',
+    noCards: 'Aucune carte', noCardsHint: 'Modifiez les filtres pour en voir davantage.', searchInSet: 'Rechercher dans la série (nom, numéro…)',
+    setNote: (sort, n, full) => `Tri : ${sort} · ${n} ${plural(n, 'carte affichée', 'cartes affichées')}${full ? ` · série complète ≈ ${full}` : ''}`,
+    addedCol: 'Ajoutée à la collection', removedCol: 'Retirée de la collection', addedWish: 'Ajoutée aux souhaits', removedWish: 'Retirée des souhaits',
+    favOn: 'Série ajoutée aux favoris', favOff: 'Série retirée des favoris', sortToast: (s) => `Tri : ${s}`,
+    myCollection: 'Ma collection', emptyCol: 'Votre collection est vide', emptyColHint: 'Ouvrez une série et touchez l\'icône carte pour marquer celles que vous possédez.', browseSets: 'Voir les séries',
+    kCards: 'Cartes', kUnique: 'Uniques', kValue: 'Valeur', all: 'Toutes',
+    emptyWish: 'Aucune carte en souhait', emptyWishHint: 'Touchez le cœur d\'une carte pour l\'ajouter ici et suivre son prix.',
+    wishBudget: 'Budget pour compléter mes souhaits', wishNote: (n, m) => `${n} ${plural(n, 'carte', 'cartes')} à acheter sur ${m}, au prix tendance Cardmarket.`,
+    searchPh: 'Nom de carte ou numéro (ex. Dracaufeu, 151 006)', searchHint: (n, m) => `${n} cartes dans ${m} séries. Tapez au moins 2 lettres.`,
+    results: (n) => `${n} ${plural(n, 'résultat', 'résultats')}`, noResult: 'Aucune carte trouvée',
+    valuesAll: 'Valeur totale : vos cartes FR, EN et JP comptées ensemble.',
+    valuesLists: (l) => `Listes ci-dessous : cartes de l'édition ${LANG_TAG[l]} (bouton EN | JP pour changer).`,
+    colValue: 'Valeur de ma collection', colValueHint: 'Marquez des cartes comme possédées pour suivre la valeur de votre collection dans le temps.',
+    pricesNote: (d) => `Prix Cardmarket (tendance, en euros) · mis à jour le ${d}`, noPricesNote: 'Les prix Cardmarket ne sont pas encore importés.',
+    mx: {
+      mineTitle: 'Ma collection : hausses et baisses', over: (d) => `sur ${d} j`, myUps: 'Ce qui a le plus monté (en €)', myDowns: 'Ce qui a le plus baissé (en €)',
+      title: 'Explorer les cotes', scope: 'Voir', market: 'Toutes les cartes', mine: 'Ma collection', wish: 'Mes souhaits', sortBy: 'Trier par', period: 'Période', kind: 'Type', count: 'Nombre', cards: 'Cartes',
+      priciest: 'Plus chères', cheapest: 'Moins chères', up: 'Hausses (%)', down: 'Baisses (%)', gain: 'Hausses (€)', loss: 'Baisses (€)', owned: 'Valeur possédée',
+      d7: '7 jours', d30: '30 jours', d90: '3 mois', ownedVal: (v) => `j'en ai pour ${v}`,
+      mineNote: 'Tes cartes et ton scellé, toutes éditions (EN, JP). Les hausses et baisses en € comptent tous tes exemplaires.', wishNote: 'Les cartes de tes souhaits.',
+    },
+    risers: 'Plus fortes hausses sur 7 jours', fallers: 'Plus fortes baisses sur 7 jours', priciest: 'Cartes les plus chères', noHistory: 'Pas encore assez d\'historique.',
+    trend: 'Tendance Cardmarket', noPrice: 'Prix à venir', over30: 'sur 30 jours', removeCopy: 'Retirer un exemplaire', addCopy: 'Ajouter un exemplaire', copies: 'Exemplaires possédés',
+    wishBtn: 'Liste de souhaits', ownBtn: 'Je possède cette carte', from: 'À partir de', avg7: 'Moy. 7 j', avg30: 'Moy. 30 j', foil: 'Foil',
+    curve: 'Courbe de prix', seeded: 'Les premiers points sont les moyennes 30 j, 7 j et 1 j de Cardmarket ; ensuite un relevé par jour.',
+    cmView: 'Voir sur Cardmarket', cmSearch: 'Rechercher sur Cardmarket', official: 'Fiche officielle (règles, versions)', art: (a) => `Illustration : ${a}`,
+    worth: (q, v) => (q > 1 ? `Vos ${q} exemplaires valent ${v}` : `Votre exemplaire vaut ${v}`),
+    cost: 'Coût', power: 'Puissance', ram: 'RAM', level: 'Niveau', soul: 'Âme', traits: 'Traits', trigger: 'Trigger', jpOf: 'Version japonaise', enOf: 'Version anglaise', enOnly: (ls) => `Carte imprimée seulement en ${ls.map((l) => LANG_FR[l]).join(' et ')}`,
+    chartWait: 'Pas encore assez d\'historique pour tracer une courbe. Le prix est relevé chaque jour.', chartNone: 'Pas de prix Cardmarket pour cette carte pour l\'instant.',
+    ranges: ['7 J', '1 M', '3 M', '1 A', 'Tout'], chartAria: (a, b, c, d) => `Courbe du prix du ${a} au ${b}, de ${c} à ${d}`,
+    language: 'Langue de l\'appli', langToast: 'Appli en français',
+    ls: {
+      tab: 'Listes', fav: 'Liste favorite', intro: 'Toutes les cartes de l\'édition rangées par licence, couleur, type, rareté ou personnage, toutes séries confondues.',
+      groups: { fav: 'Favorites', collection: 'Types de cartes', rarity: 'Raretés', color: 'Couleurs', licence: 'Licences', character: 'Personnages' },
+      chars: 'Personnages de cette licence', allChars: (n) => `Les personnages les plus présents (au moins ${n} cartes). Tous les autres sont dans la page de leur licence.`,
+    },
+    bd: {
+      tab: 'Classeurs', layout: 'Format des pages', limit: 'Un classeur perso en version gratuite. Classeurs illimités avec le statut Soutien.', plusUnlimited: 'Classeurs illimités', plusMore: '… et d\'autres avantages (photo de profil, bannière, cadre doré)', plusBtn: 'Soutenir WeissDex', plusHint: 'Après ton don, ton statut Soutien est activé sur ton compte (mets ton ID WeissDex dans le message).',
+      value: (a, b) => `~${a} / ~${b}`, owned: (a, b) => `${a}/${b} carte${b > 1 ? 's' : ''} possédée${b > 1 ? 's' : ''}`, settings: 'Réglages du classeur', prices: 'Afficher les prix',
+      mine: 'Mes classeurs', master: 'Master Set des séries', new: 'Nouveau classeur', name: 'Nom du classeur', namePh: 'Mes Légendes, Mon classeur Arasaka…', color: 'Couverture', create: 'Créer',
+      pages: (n) => `${n} page${n > 1 ? 's' : ''}`, fill: 'Remplir avec…', fillList: 'une liste', fillOwned: 'mes cartes possédées', addPage: 'Ajouter une page',
+      rename: 'Renommer', del: 'Supprimer le classeur', delConfirm: 'Toucher encore pour supprimer', pick: 'Choisir une carte', pickPh: 'Nom ou numéro de carte', remove: 'Retirer',
+      none: 'Crée ton premier classeur pour ranger tes cartes comme dans un vrai classeur.', readOnly: 'Classeur automatique : la série dans l\'ordre, les cartes manquantes en gris.', created: 'Classeur créé', deleted: 'Classeur supprimé',
+    },
+    cd: {
+      mine: 'Mes decks', tourney: 'Tournois', community: 'Communauté', by: (a) => `par ${a}`, official: 'Voir sur le site officiel', none: 'Aucun deck pour l\'instant.', updated: (d) => `mis à jour le ${d}`,
+      communityHint: 'Les decks publics les plus appréciés du créateur de decks officiel (cyberpunktcg.com/decks), relevés chaque jour.',
+      tourneyHint: 'Les decks publics qui annoncent un résultat de tournoi (Showdown, Brawl, Top 8, 1re place…), en attendant les decks de tournoi officiels.',
+    },
+    lb: {
+      title: 'Classement', friends: 'Amis', world: 'Monde', mValue: 'Valeur', mCards: 'Cartes', mSets: 'Séries vérifiées', me: 'moi',
+      signIn: 'Connecte-toi à ton compte WeissDex pour voir le classement.', rulesNeeded: 'Classement indisponible : mets à jour les règles Firestore.',
+      line: (c, u, v) => `${c} carte${c > 1 ? 's' : ''} · ${u} différente${u > 1 ? 's' : ''} · ${v} série${v > 1 ? 's' : ''} ✓`,
+      optin: 'Apparaître dans le classement mondial (ton pseudo, ton nombre de cartes, la valeur et tes séries vérifiées)',
+      needPseudo: 'Choisis d\'abord un pseudo dans', joined: 'Tu apparais dans le classement mondial', left: 'Tu n\'apparais plus dans le classement mondial',
+      emptyWorld: 'Personne dans le classement mondial pour l\'instant. Inscris-toi avec la case ci-dessus !', emptyFriends: 'Ajoute des amis pour vous comparer.',
+      mySets: 'Mes séries complètes', verifiedCount: (v, n) => `${v}/${n} vérifiée${v > 1 ? 's' : ''}`, verify: 'Vérifier', allVerified: 'Toutes tes séries complètes sont vérifiées ✓', noneComplete: 'Aucune série complète pour l\'instant.',
+      rule: 'Une série complète ne compte dans « Séries vérifiées » qu\'avec une photo prise en direct de sa carte la plus chère, reconnue par l\'appli. Les photos sont visibles par les autres joueurs (touche un pseudo).',
+      setDone: 'Série complète !', setVerified: ' Vérifiée ✓', setToVerify: ' Vérifie-la avec une photo de sa carte la plus chère pour qu\'elle compte au classement.',
+      notComplete: 'Cette série n\'est pas encore complète.', camTitle: 'Photo de vérification', camHint: (s) => `Carte la plus chère de ${s} : tiens-la bien en face, dans le cadre.`,
+      aim: 'Place la carte dans le cadre : la photo se prend toute seule quand elle est reconnue.', shoot: 'Prendre la photo', noCamera: 'Caméra indisponible : la vérification demande une photo prise en direct avec le téléphone.',
+      notRecognised: 'Carte pas reconnue : rapproche-toi, évite les reflets, mets-la bien droite.', wrongCard: (n) => `Ce n'est pas la bonne carte (${n}).`,
+      verified: (s) => `${s} : série vérifiée ✓`, proofsIntro: 'Photos prises en direct des cartes les plus chères de ses séries complètes.', noProofs: 'Aucune série vérifiée.',
+      myCards: (m) => `Mes cartes de plus de ${m} € à vérifier`, pending: (v) => `${v} pas encore compté`, cardsAllOk: 'Toutes tes cartes chères sont vérifiées ✓ (ou tu n\'en as pas).',
+      cardRule: (m) => `Anti-triche : une carte qui vaut ${m} € ou plus ne compte dans la valeur du classement qu'après une photo prise en direct, reconnue par l'appli. Les autres cartes comptent directement.`,
+      cardOk: 'Vérifiée ✓ : elle compte dans ta valeur au classement', cardNeeds: (m) => `Plus de ${m} € : vérifie-la par photo pour qu'elle compte au classement`,
+      camHintCard: 'Tiens la carte bien en face, dans le cadre.', cardVerified: (n) => `${n} : carte vérifiée ✓`, verifiedCards: 'Cartes vérifiées',
+      adminRemove: 'Retirer du classement', adminDone: 'Compte retiré du classement (et ses photos de vérification)',
+    },
+    wl: {
+      new: 'Nouvelle liste', lists: 'Mes listes :', rename: 'Renommer', del: 'Supprimer la liste', namePrompt: 'Nom de la liste (ex. Johnny, Deck rouge, Cadeaux…)',
+      created: (n) => `Liste « ${n} » créée`, deleted: 'Liste supprimée (les cartes restent dans tes souhaits)', delConfirm: (n) => `Supprimer la liste « ${n} » ? Les cartes restent dans tes souhaits.`,
+      budget: (n) => `Budget pour la liste « ${n} »`, empty: 'Cette liste est vide', emptyHint: 'Ouvre une carte de tes souhaits et touche le nom de la liste pour l\'y ranger.',
+      intro: 'Astuce : crée des listes (« + Nouvelle liste ») pour ranger tes souhaits par thème et voir le budget de chacune.',
+    },
+    al: {
+      title: 'Alertes prix', count: (n) => `${n} active${n > 1 ? 's' : ''}`, label: 'Alerte si le prix passe sous (€)', off: 'Aucune alerte', hit: 'Prix atteint !', waiting: 'En attente',
+      howTo: 'Ouvre une carte de tes souhaits et indique un prix : WeissDex te prévient quand la cote Cardmarket passe en dessous.',
+      enable: 'Activer les notifications sur ce téléphone', enabled: 'Notifications activées', denied: 'Notifications refusées', unsupported: 'Ce navigateur ne gère pas les notifications',
+      notifOn: 'Notifications activées : tu seras prévenu même appli fermée quand Android le permet (appli installée), sinon à la prochaine ouverture.',
+      notifBlocked: 'Notifications bloquées : autorise-les dans les réglages du navigateur pour ce site.',
+      askNotif: 'Alerte enregistrée. Active les notifications dans tes Souhaits pour être prévenu sur ton téléphone.',
+      toast: (n) => `🔔 ${n} alerte${n > 1 ? 's' : ''} prix atteinte${n > 1 ? 's' : ''} : voir tes souhaits`,
+      notifTitle: (n, p) => `${n} est à ${p}`, notifBody: (t) => `Ton alerte WeissDex : sous ${t}. Touche pour voir tes souhaits.`,
+    },
+    sh: {
+      title: 'Partager le deck', signIn: 'Connecte-toi à ton compte WeissDex pour partager ou importer un deck.', rulesNeeded: 'Partage indisponible : mets à jour les règles Firestore.', error: 'Partage impossible pour le moment, réessaie.',
+      hint: (n) => `Donne ce code à tes amis : ils retrouveront « ${n} » dans Decks → Importer avec un code.`, copy: 'Copier le code', send: 'Envoyer…', copied: 'Code copié',
+      update: 'Si tu modifies ton deck, appuie à nouveau sur Partager pour mettre à jour la version partagée (même code).', stop: 'Arrêter le partage', stopped: 'Le code ne fonctionne plus',
+      message: (n, c) => `Mon deck Weiss Schwarz « ${n} » sur WeissDex — code : ${c}`, importTitle: 'Importer avec un code', codePh: 'Code à 6 caractères', open: 'Voir le deck',
+      badCode: 'Ce code n\'est pas valide (6 lettres ou chiffres).', notFound: (c) => `Aucun deck partagé avec le code ${c}.`, by: (p) => `Deck de ${p}`, codeLabel: 'code',
+      import: 'Copier dans mes decks', imported: 'Deck ajouté à tes decks', friendDecks: 'Ses decks',
+    },
+    buy: {
+      btn: 'Acheter', setBtn: 'Liste d\'achat Cardmarket des cartes manquantes', deckBtn: (n) => `Acheter les ${n} carte${n > 1 ? 's' : ''} manquante${n > 1 ? 's' : ''} sur Cardmarket`,
+      title: 'Liste d\'achat Cardmarket', from: { wish: 'souhaits pas encore possédés', set: 'cartes manquantes de la série', deck: 'cartes du deck qui te manquent' },
+      filters: 'Filtres', one: '1 exemplaire', playset: 'Playset (3)', lang: 'Langue', cond: 'État minimum', max: 'Prix max par carte (€)', noMax: 'Aucun', version: 'Version', normal: 'Normale',
+      estimate: 'Total estimé (prix tendance)', summary: (n, k) => `${n} carte${n > 1 ? 's' : ''} à acheter · ${k} ligne${k > 1 ? 's' : ''}`,
+      offers: 'Voir les offres filtrées', add: 'Ajouter', none: 'Rien à acheter : tu as déjà tout !', noneFiltered: 'Aucune carte avec ces filtres.',
+      copy: 'Copier la liste pour Cardmarket', copied: 'Liste copiée : colle-la dans tes Wants Cardmarket', openWants: 'Ouvrir mes Wants sur Cardmarket',
+      howTitle: 'Trouver un vendeur qui a le plus de cartes',
+      how: ['Copie la liste avec le bouton ci-dessus.', 'Sur Cardmarket, ouvre <b>Wants</b>, crée une liste et colle les cartes (ajout par liste / decklist). Choisis la langue et l\'état minimum pour toute la liste.', 'Lance l\'<b>Assistant d\'achat</b> (Shopping Wizard) : Cardmarket cherche le ou les vendeurs qui ont le plus de tes cartes au meilleur prix, frais de port compris.', 'Pour une carte précise, « Voir les offres filtrées » ouvre ses offres déjà triées par langue, état et version.'],
+    },
+    cp: { title: 'Mes exemplaires', cond: 'État', foilOnly: 'imprimée en foil', foilPrice: (v) => `foil ≈ ${v}`, more: (n) => `+ ${n} autres exemplaires (en Near Mint)`,
+      conds: { MT: 'Mint (MT)', NM: 'Near Mint (NM)', EX: 'Excellent (EX)', GD: 'Good (GD)', LP: 'Light Played (LP)', PL: 'Played (PL)', PO: 'Poor (PO)' } },
+    news: {
+      title: 'Actualités', unread: (n) => `${n} non lu${n > 1 ? 's' : ''}`, new: 'Nouveau', read: 'Lire l\'article', empty: 'Pas encore d\'actualités.',
+      intro: 'Les dernières nouvelles du Cyberpunk TCG, depuis le blog officiel. Titres et résumés traduits en français ; les articles complets sont en anglais sur le site officiel. Mises à jour chaque jour.',
+    },
+    ex: {
+      tab: 'Extra', cats: { staff: 'Cartes du personnel', other: 'Hors séries' }, catHint: { staff: 'Offertes aux employés, jamais vendues en boutique.' },
+      note: 'Ces cartes ne sont pas sur Cardmarket : leur prix est une estimation d\'après les annonces eBay, mise à jour à la main.',
+      priceNote: (v, d, s) => `Prix estimé ${v} d'après ${s} (${d}) — pas de cote Cardmarket.`,
+      estimate: 'Prix estimé (eBay)', ebayLive: 'Voir les annonces sur eBay', ebaySold: 'Voir les ventes réussies sur eBay',
+    },
+    dk: {
+      ownCount: 'Mes cartes comptées :', ownToast: (l) => `Cartes possédées comptées : ${l}`,
+      title: 'Decks', new: 'Nouveau deck', untitled: 'Deck sans nom', defaultName: (n) => `Mon deck ${n}`, namePh: 'Nom du deck', cancel: 'Annuler',
+      empty: 'Aucun deck pour l\'instant', emptyHint: 'Crée tes decks avec les règles officielles : 3 Légendes, 40 à 50 cartes, la RAM vérifiée automatiquement.',
+      cards: (n) => `${n} carte${n > 1 ? 's' : ''}`, legal: 'Deck valide', notLegal: 'Deck pas encore valide', toFix: 'à corriger',
+      missing: (n, v) => `Il te manque ${n} carte${n > 1 ? 's' : ''} (≈ ${v})`, complete: 'Tu as toutes les cartes de ce deck.',
+      cLegends: (n) => `Légendes : ${n}/3, toutes différentes`, sameLegend: 'Deux Légendes portent le même nom.',
+      cSize: (n) => `Deck : ${n} cartes (40 à 50, Légendes non comptées)`, needMore: (n) => `Encore ${n} carte${n > 1 ? 's' : ''} minimum.`, tooMany: (n) => `${n} carte${n > 1 ? 's' : ''} en trop.`,
+      cCopies: '3 exemplaires max par carte (toutes éditions)', cRam: 'RAM des cartes ≤ RAM de leur couleur', overRam: (n) => `${n} carte${n > 1 ? 's demandent' : ' demande'} trop de RAM.`,
+      ramLegend: 'RAM par couleur, apportée par tes Légendes', isLegend: 'Légende', ramShort: (r, c) => `RAM ${r} ${c}`, max3: 'Déjà 3', sideFull: 'Réserve pleine',
+      legends: 'Légendes', addLegend: 'Légende', removeLegend: 'Retirer cette Légende', pickLegend: 'Choisis une Légende', legSearch: 'Chercher une Légende',
+      main: 'Deck', side: 'Réserve', mainHint: 'Ajoute des cartes avec la liste ci-dessous.', sideHint: 'Réserve de tournoi : 7 cartes que tu peux échanger entre les parties.',
+      curve: 'Courbe de coût', addCards: 'Ajouter des cartes', searchPh: 'Nom ou numéro de carte', mine: 'Mes cartes', allColors: 'Toutes les couleurs',
+      own: (o, n) => `tu en as ${o}/${n}`, refine: (n) => `${n} cartes : affine la recherche pour voir les autres.`,
+      export: 'Copier la liste', copied: 'Liste du deck copiée', duplicate: 'Dupliquer ce deck', duplicated: 'Deck dupliqué',
+      del: 'Supprimer ce deck', delSure: 'Appuie encore pour supprimer', deleted: 'Deck supprimé',
+      rulesTitle: 'Règles de construction',
+      rules: ['Exactement <b>3 Légendes</b>, avec des noms différents.', '<b>40 à 50 cartes</b> dans le deck, sans compter les Légendes.', '<b>3 exemplaires maximum</b> d\'une même carte, toutes éditions confondues.', '<b>RAM</b> : chaque couleur part de 0 ; chaque Légende ajoute sa RAM à sa couleur. Une carte ne peut pas demander plus de RAM que la limite de sa couleur.', 'En tournoi : une <b>réserve de 7 cartes</b>.'],
+      rulesNeeded: 'Decks gardés sur ce téléphone : mets à jour les règles Firestore pour les synchroniser.',
+    },
+    gr: {
+      tab: 'Gradées', tabCards: 'Cartes', add: 'Ajouter une gradée', edit: 'Modifier le slab', addThis: 'Ajouter une version gradée', youHave: (n) => `${n} gradée${n > 1 ? 's' : ''}`,
+      empty: 'Aucune carte gradée pour l\'instant', emptyHint: 'Ajoute tes slabs PSA, Beckett, CGC, PCA, Collect Aura… avec leur note, leur numéro de certificat et une photo.',
+      kSlabs: 'Slabs', kPaid: 'Payé', kValue: 'Valeur estimée', noSale: 'Pas de vente',
+      valueNote: 'Valeur estimée = médiane des 3 dernières ventes réussies que tu as relevées pour la même carte, langue, société et note.',
+      card: 'Carte', findCard: 'Nom ou numéro de la carte (ex. MS01 008)', change: 'Changer', company: 'Société de gradation', other: 'Autre',
+      grade: 'Note', cert: 'N° de certificat', certPh: 'Sur l\'étiquette du slab', certShort: 'Certificat', verify: 'vérifier',
+      purchase: 'Achat', paid: 'Prix payé (€)', date: 'Date', photo: 'Photo du slab', optional: 'facultatif',
+      photoAdd: 'Prendre ou choisir une photo', photoChange: 'Changer la photo', photoDel: 'Retirer la photo', photoErr: 'Impossible de lire cette photo.',
+      photoHint: 'Elle remplace le slab dessiné. Gardée sur ton téléphone et dans ton compte si tu es connecté. Vérifiée automatiquement avant d\'être partagée (pas de nudité, de sang ni de violence).',
+      save: 'Enregistrer', del: 'Supprimer ce slab', delSure: 'Appuie encore pour supprimer', added: 'Slab ajouté', saved: 'Slab modifié', deleted: 'Slab supprimé',
+      estimate: 'Valeur estimée', paidOn: (p, d) => `Payé ${p}${d ? ` le ${d}` : ''}`,
+      curve: 'Ventes réussies', salesCount: (n) => `${n} vente${n > 1 ? 's' : ''} relevée${n > 1 ? 's' : ''}`, salePrice: 'Prix de vente (€)', addSale: 'Vente', delSale: 'Supprimer cette vente', saleAdded: 'Vente ajoutée à la courbe',
+      chartWait: 'Ajoute au moins deux ventes réussies pour tracer la courbe.',
+      ebayNote: 'eBay ne laisse pas les applis lire automatiquement les ventes réussies (réservé à ses partenaires agréés). Ouvre-les avec le bouton ci-dessous, puis note les prix ici : la courbe et la valeur se mettent à jour.',
+      ebay: 'Voir les ventes réussies sur eBay', pc: 'Cote gradée sur PriceCharting', seeCard: 'Voir la fiche de la carte',
+      rulesNeeded: 'Cartes gradées gardées sur ce téléphone : mets à jour les règles Firestore pour les synchroniser.',
+    },
+    paidLabel: 'Prix d\'achat / carte', paidHint: 'Différence avec la cote', paidVs: 'Différence :', boughtFor: (v) => `achetées ${v}`,
+    paidSum: (n, v) => `Prix d'achat noté pour ${n} carte${n > 1 ? 's' : ''} : ${v}`,
+    zoom: 'Voir la carte en 3D', v3d: { flip: 'Retourner', reset: 'Remettre de face', tip: 'Glisse pour tourner la carte · double-touche pour la retourner' },
+    otherCopies: (n, l) => `+ ${n} exemplaire${n > 1 ? 's' : ''} en ${l} (bouton EN | JP pour y passer)`, colLang: (l) => `Collection ${l.toUpperCase()}`,
+    cardLanguage: 'Édition des cartes', cardLangHint: 'Le bouton EN | JP de l\'accueil fait la même chose : séries, noms et images de cette édition. Chaque édition a sa propre collection.',
+    cardLangToast: (l) => ({ en: 'Cartes : édition anglaise', ja: 'Cartes : édition japonaise' }[l]),
+    langHint: 'Menus, boutons et textes de WeissDex.',
+    hiddenSets: (n, l) => `${n} série${n > 1 ? 's' : ''} n'existe${n > 1 ? 'nt' : ''} pas en ${LANG_FR[l]}.`, showOther: (l) => `Voir les cartes ${l.toUpperCase()}`,
+    noCardsLang: (l) => `Aucune carte de cette série n'est imprimée en ${LANG_FR[l]}.`,
+    prev: 'Carte précédente', next: 'Carte suivante',
+    fr: {
+      title: 'Amis', gate: 'Connecte-toi à ton compte WeissDex pour ajouter des amis et voir leurs collections.',
+      choose: 'Choisis ton pseudo', chooseHint: 'Tes amis t\'ajouteront avec ce pseudo. 3 à 20 caractères : lettres minuscules, chiffres, . _ -',
+      pseudoPh: 'ex. dresseur_77', save: 'Enregistrer', pseudoRule: 'Pseudo invalide : 3 à 20 caractères (a-z, 0-9, . _ -).', pseudoTaken: 'Ce pseudo est déjà pris, essaie-en un autre.', pseudoSaved: 'Pseudo enregistré',
+      add: 'Ajouter un ami', yourPseudo: 'Ton pseudo :', addPh: 'Pseudo de ton ami', send: 'Envoyer',
+      privacy: 'Tes amis acceptés peuvent voir ta collection et tes souhaits. Personne d\'autre.',
+      notFound: (p) => `Aucun compte avec le pseudo « ${p} ».`, self: 'C\'est ton propre pseudo !', already: (p) => `@${p} est déjà ton ami.`,
+      sent: 'Demande envoyée', accepted: 'Ami ajouté', removed: 'Ami retiré', denied: 'Action refusée : vérifie que les règles Firestore sont à jour.', error: 'Une erreur est survenue, réessaie.',
+      requests: 'Demandes reçues', wants: 'veut devenir ton ami', accept: 'Accepter', decline: 'Refuser',
+      mine: 'Mes amis', see: 'Voir sa collection', open: 'Voir', remove: 'Retirer', confirm: 'Confirmer ?',
+      none: 'Pas encore d\'amis', noneHint: 'Ajoute un ami avec son pseudo : il devra accepter ta demande.',
+      loading: 'Chargement de sa collection…', cantSee: 'Collection inaccessible', cantSeeHint: 'Vous n\'êtes peut-être plus amis, ou les règles Firestore ne sont pas à jour.',
+      fAll: 'Sa collection', fTrade: 'Il l\'a, pas moi', fGive: 'Il la cherche, je l\'ai', fWish: 'Ses souhaits', emptyFilter: 'Rien dans ce filtre pour l\'instant.',
+      tagMine: 'Je l\'ai', tagWant: 'Dans mes souhaits',
+    },
+    scan: { btn: 'Scan', title: 'Scanner une carte', starting: 'Ouverture de la caméra…', aim: 'Place la carte dans le cadre, bien à plat, sans reflet.', holding: 'Je la tiens… ne bouge plus.', photo: 'Choisir une photo', torch: 'Lampe',
+      denied: 'Accès à la caméra refusé. Autorise-le dans les réglages du navigateur, ou choisis une photo de la carte.', noCamera: 'Pas de caméra disponible. Choisis plutôt une photo de la carte, bien cadrée.', indexErr: 'Impossible de charger le scanner. Vérifie ta connexion et réessaie.',
+      unsure: 'Pas sûr à 100 % : vérifie que c\'est la bonne.', owned: (q) => `Tu en as déjà ${q}.`, versions: 'Autres versions de cette carte :', notIt: 'Ce n\'est pas elle ?',
+      add: '+1 Je l\'ai', open: 'Voir la fiche', again: 'Rescanner', added: (q) => `Ajoutée : tu en as ${q}` },
+    inst: { android: 'Ouvre le menu ⋮ de Chrome puis « Installer l\'application » (ou « Ajouter à l\'écran d\'accueil ») : WeissDex s\'ouvre ensuite en plein écran comme une vraie appli.', title: 'Installe WeissDex', pitch: 'Comme une vraie appli : icône sur ton écran, plein écran sans navigateur, et ça marche hors connexion.', btn: 'Installer', ios: 'Sur iPhone : touche Partager (le carré avec la flèche), puis « Sur l\'écran d\'accueil ».', done: 'WeissDex est installée ! Ouvre-la depuis ton écran d\'accueil.' },
+    crop: { titleAvatar: 'Recadrer la photo', titleBanner: 'Recadrer la bannière', zoom: 'Zoom', hint: 'Glisse pour déplacer l\'image, pince ou utilise le curseur pour zoomer.', cancel: 'Annuler', ok: 'Valider' },
+    mod: {
+      bannerAdd: 'Ajouter une bannière', bannerChange: 'Changer la bannière', bannerEmpty: 'Ta bannière de profil', bannerSaved: 'Bannière enregistrée', bannerRemoved: 'Bannière retirée',
+      checking: 'Vérification de l\'image…', policy: 'Chaque image est vérifiée automatiquement avant d\'être publiée : pas de nudité, de contenu sexuel, de sang, de cadavre ni de violence.',
+      rejected: (c) => `Image refusée : ${c}. Choisis une autre image.`, unavailable: 'Vérification de l\'image impossible pour le moment : elle n\'a pas été publiée. Réessaie plus tard.',
+      cats: { sexual: 'contenu sexuel', nudity: 'nudité', gore: 'sang ou blessures', violence: 'violence', hate: 'contenu haineux', drugs: 'drogue', other: 'contenu inapproprié' },
+      adminTitle: 'Retirer la photo et la bannière d\'un compte (image signalée) :', adminRemove: 'Retirer', adminDone: 'Images du compte retirées',
+    },
+    adm: { title: 'Administration', role: 'rôle admin', idPh: 'ID WeissDex du donateur', activate: 'Activer', remove: 'Retirer', listTitle: 'Soutiens actifs', none: 'Aucun soutien pour l\'instant.', on: 'Soutien activé', off: 'Soutien retiré', badId: 'ID invalide : copie-le depuis « Mon compte » du donateur.', denied: 'Refusé : les règles Firestore ne reconnaissent pas encore ce compte comme admin (publie les nouvelles règles).' },
+    support: 'Soutenir WeissDex', supportHint: 'WeissDex est gratuit et fait par un fan. Un don aide à le faire vivre et débloque des bonus (photo de profil, cadre doré).',
+    supporter: 'Soutien', supporterThanks: 'Merci pour ton soutien ! Tes bonus sont actifs.',
+    myId: 'Ton ID WeissDex', myIdHint: 'Indique-le dans le message de ton don pour recevoir tes bonus.', copy: 'Copier', copiedId: 'ID copié',
+    avatar: 'Photo de profil', avatarChange: 'Changer la photo', avatarAdd: 'Ajouter une photo', avatarRemove: 'Retirer', avatarLocked: 'Réservé aux soutiens de WeissDex.', avatarSaved: 'Photo enregistrée', avatarRemoved: 'Photo retirée', avatarErr: 'Impossible d\'enregistrer la photo. Réessaie.', avatarDenied: 'Photo réservée aux soutiens : ton statut n\'est pas encore actif.',
+    petSetting: 'Capri se balade dans l\'appli', yes: 'Oui', no: 'Non', petHint: 'Touche-la pour qu\'elle réagisse, deux fois pour discuter, ou fais-la glisser sur une carte. Appui long (ou × sur PC) pour la cacher.',
+    petHide: 'Cacher Capri', petBye: 'Ok, je disparais… *bzzt*', petHidden: 'Capri est cachée jusqu\'à la prochaine ouverture. Pour de bon : Réglages.',
+    capriSpoil: (on) => `Spoilers S2 : ${on ? 'oui' : 'non'}`, capriReset: 'Effacer', capriSend: 'Envoyer', capriStop: 'Stop', capriPh: 'Écris à Capri…', capriTyping: 'connexion aux engrammes', capriListen: 'Écouter',
+    capriHello: '*grésillement* … Ah, la liaison tient. Salut, choom. Moi c\'est Capri : plusieurs esprits recousus en une seule, sans corps, juste une puce et beaucoup de curiosité. Tu veux savoir quoi ?',
+    capriSuggest: ['Qui es-tu, Capri ?', 'C\'est quoi un engramme ?', 'Ça fait quoi de ne pas avoir de corps ?', 'Ton avis sur Arasaka ?', 'Tu aimes les cartes Cyberpunk ?'],
+    capriSuggestSpoil: ['D\'où tu viens vraiment ?', 'Que s\'est-il passé avec Talia ?', 'Qu\'est-ce que tu ressens pour D ?', 'Comment finit la saison 2 ?'],
+    capriGateTitle: 'Discute avec Capri', capriGate: 'L\'IA d\'Edgerunners 2 répond à tes questions, dans son personnage. Connecte-toi à ton compte WeissDex pour lui parler.',
+    capriNoCloud: 'Le chat avec Capri a besoin des comptes WeissDex (Firebase).',
+    capriFoot: 'Chatbot de fan non officiel · Capri © CD Projekt / Studio Trigger · réponses générées par Gemini (Google), elles peuvent contenir des erreurs.',
+    capriErr: { busy: '*grésillement* Les serveurs de Gemini sont saturés en ce moment (beaucoup de monde). Réessaie dans une minute.', timeout: '*grésillement* Gemini ne répond pas pour l\'instant (trop lent). Réessaie dans un moment.', denied: 'Google refuse l\'accès pour l\'instant (autorisation de la clé du projet). Envoie le détail ci-dessous à ton développeur.', region: 'Gemini gratuit n\'est pas disponible depuis ta région.', notEnabled: 'Capri n\'est pas encore branchée : il faut activer « AI Logic » (Gemini Developer API) dans la console Firebase.', quota: '*grésillement* J\'ai trop parlé aujourd\'hui : la limite gratuite est atteinte. Réessaie plus tard.', offline: 'Pas de connexion internet : je ne capte plus rien, choom.', model: 'Aucun modèle Gemini disponible pour l\'instant. Réessaie plus tard.', blocked: '*grésillement* Ce sujet-là, mes circuits refusent d\'y aller. Demande-moi autre chose.', other: '*grésillement* La liaison a sauté. Réessaie dans un instant.' },
+    account: 'Mon compte', accountShort: 'Compte',
+    accountPitch: 'Connecte-toi pour retrouver ta collection, tes souhaits et tes séries favorites sur tous tes appareils, et ajouter des amis. Sans compte, tout reste enregistré sur ce téléphone.',
+    google: 'Continuer avec Google', or: 'ou', email: 'Adresse e-mail', password: 'Mot de passe (6 caractères minimum)',
+    signIn: 'Se connecter', signUp: 'Créer un compte', forgot: 'Mot de passe oublié ?', resetSent: 'E-mail de réinitialisation envoyé',
+    signedAs: (e) => `Connecté : ${e}`, signOut: 'Se déconnecter', signedOut: 'Déconnecté. Ta collection reste sur ce téléphone.',
+    welcome: 'Connecté : ta collection est synchronisée',
+    syncOk: (t) => `Collection synchronisée${t ? ` · ${t}` : ''}`, syncing: 'Synchronisation…', syncErr: 'Synchronisation impossible pour le moment. Tes changements sont gardés sur ce téléphone et seront envoyés plus tard.',
+    syncInfo: (n, w) => `${n} ${plural(n, 'carte ou produit possédé', 'cartes et produits possédés')}, ${w} ${plural(w, 'souhait', 'souhaits')} : enregistrés sur ton compte.`,
+    deleteAcc: 'Supprimer mes données WeissDex', deleteConfirm: 'Confirmer la suppression', deleteNote: 'Supprime la copie en ligne de ta collection WeissDex (collection, gradées, classement, pseudo et amis). La collection reste sur ce téléphone.',
+    deleted: 'Données WeissDex supprimées',
+    authErr: { 'auth/invalid-email': 'Adresse e-mail invalide.', 'auth/missing-password': 'Indique un mot de passe.', 'auth/weak-password': 'Mot de passe trop court : 6 caractères minimum.', 'auth/email-already-in-use': 'Un compte existe déjà avec cette adresse : connecte-toi.', 'auth/invalid-credential': 'E-mail ou mot de passe incorrect.', 'auth/wrong-password': 'E-mail ou mot de passe incorrect.', 'auth/user-not-found': 'Aucun compte avec cette adresse.', 'auth/too-many-requests': 'Trop d\'essais : réessaie dans quelques minutes.', 'auth/network-request-failed': 'Pas de connexion internet.', 'auth/requires-recent-login': 'Par sécurité, déconnecte-toi puis reconnecte-toi avant de supprimer ton compte.', 'auth/unauthorized-domain': 'Ce site n\'est pas encore autorisé dans Firebase (domaines autorisés).', default: 'Une erreur est survenue, réessaie.' },
+    disclaimer: 'WeissDex est une appli de fan non officielle, sans lien avec Bushiroad. Weiss Schwarz, les noms des cartes et leurs illustrations appartiennent à Bushiroad et aux ayants droit des licences. Base de cartes : WS Lounge (licence CC0), d\'après les listes officielles ; images : ws-tcg.com / en.ws-tcg.com. Prix : Cardmarket (tendance, mis à jour chaque jour).',
+    storage: (n, w) => `Votre collection est enregistrée sur cet appareil (${n} cartes possédées, ${w} souhaits). Exportez-la pour la sauvegarder ou la transférer sur un autre téléphone.`,
+    export: 'Exporter ma collection (copier)', import: 'Importer un fichier de sauvegarde', dataLine: (n, m, d) => `Données : ${n} cartes, ${m} séries · prix Cardmarket du ${d}.`, close: 'Fermer',
+    copied: 'Sauvegarde copiée', selectCopy: 'Sélectionnez le texte pour le copier', imported: 'Collection importée', badFile: 'Fichier invalide : choisissez un export WeissDex',
+    loadError: 'Impossible de charger les cartes', loadErrorHint: 'Vérifiez que les fichiers data/catalog.json et data/prices.json existent, puis rechargez la page.',
+    rarity: {},
+    type: { Character: 'Personnage', Event: 'Événement', Climax: 'Climax' },
+    color: { Yellow: 'Jaune', Green: 'Vert', Red: 'Rouge', Blue: 'Bleu', Purple: 'Violet' },
+  },
+  en: {
+    sealed: 'Sealed', setsTab: 'Sets', toggleView: 'Change view',
+    cats: { booster: 'Boosters', box: 'Booster boxes', case: 'Cases of 6 booster boxes', deck: 'Decks', kit: 'Kits & box sets' },
+    catOne: { booster: 'Booster', box: 'Booster box', case: 'Case of 6 booster boxes', deck: 'Deck', kit: 'Kit' },
+    sealedNote: (d) => `Cardmarket trend prices for sealed products${d ? ` · updated ${d}` : ''}. Products without a price have no sales yet.`,
+    sealedCount: (n) => `${n} sealed ${plural(n, 'product', 'products')}`,
+    home: 'Home', collection: 'Collection', market: 'Market', wishlist: 'Wishlist', search: 'Search', searchCard: 'Search a card',
+    settings: 'Settings', list: 'List', grid: 'Grid', cards: 'Cards', searchSet: 'Search a set', noSet: 'No set found', favorites: 'Favourites',
+    blocks: { new: 'New sets', misc: 'Other' },
+    back: 'Back', favSet: 'Favourite set', changeSort: 'Change sort', filters: 'Filters',
+    owned: (a, b) => `${a}/${b} owned`, myValue: 'My value', pricesSoon: 'Cardmarket prices coming soon',
+    sorts: { num: 'Number', 'price-desc': 'Price high to low', 'price-asc': 'Price low to high', name: 'Name' },
+    ownF: { all: 'All', owned: 'Owned', missing: 'Missing' }, allRarities: 'All rarities',
+    noCards: 'No cards', noCardsHint: 'Change the filters to see more.', searchInSet: 'Search this set (name, number…)',
+    setNote: (sort, n, full) => `Sort: ${sort} · ${n} ${plural(n, 'card', 'cards')} shown${full ? ` · full set ≈ ${full}` : ''}`,
+    addedCol: 'Added to collection', removedCol: 'Removed from collection', addedWish: 'Added to wishlist', removedWish: 'Removed from wishlist',
+    favOn: 'Set added to favourites', favOff: 'Set removed from favourites', sortToast: (s) => `Sort: ${s}`,
+    myCollection: 'My collection', emptyCol: 'Your collection is empty', emptyColHint: 'Open a set and tap the card icon to mark the cards you own.', browseSets: 'Browse sets',
+    kCards: 'Cards', kUnique: 'Unique', kValue: 'Value', all: 'All',
+    emptyWish: 'Your wishlist is empty', emptyWishHint: 'Tap the heart on a card to add it here and follow its price.',
+    wishBudget: 'Budget to complete my wishlist', wishNote: (n, m) => `${n} ${plural(n, 'card', 'cards')} to buy out of ${m}, at Cardmarket trend price.`,
+    searchPh: 'Card name or number (e.g. Charizard, 151 006)', searchHint: (n, m) => `${n} cards in ${m} sets. Type at least 2 letters.`,
+    results: (n) => `${n} ${plural(n, 'result', 'results')}`, noResult: 'No card found',
+    valuesAll: 'Total value: your FR, EN and JP cards counted together.',
+    valuesLists: (l) => `Lists below: ${LANG_TAG[l]} edition cards (EN | JP button to switch).`,
+    colValue: 'My collection value', colValueHint: 'Mark cards as owned to follow the value of your collection over time.',
+    pricesNote: (d) => `Cardmarket prices (trend, in euros) · updated ${d}`, noPricesNote: 'Cardmarket prices have not been imported yet.',
+    mx: {
+      mineTitle: 'My collection: risers and fallers', over: (d) => `over ${d} d`, myUps: 'Biggest gains (in €)', myDowns: 'Biggest losses (in €)',
+      title: 'Explore prices', scope: 'Show', market: 'All cards', mine: 'My collection', wish: 'My wishlist', sortBy: 'Sort by', period: 'Period', kind: 'Type', count: 'Count', cards: 'Cards',
+      priciest: 'Most expensive', cheapest: 'Cheapest', up: 'Risers (%)', down: 'Fallers (%)', gain: 'Gains (€)', loss: 'Losses (€)', owned: 'Owned value',
+      d7: '7 days', d30: '30 days', d90: '3 months', ownedVal: (v) => `I own ${v}`,
+      mineNote: 'Your cards and sealed products, in French and English. Gains and losses in € count all your copies.', wishNote: 'The cards in your wishlist.',
+    },
+    risers: 'Biggest risers over 7 days', fallers: 'Biggest fallers over 7 days', priciest: 'Most expensive cards', noHistory: 'Not enough history yet.',
+    trend: 'Cardmarket trend', noPrice: 'No price yet', over30: 'over 30 days', removeCopy: 'Remove a copy', addCopy: 'Add a copy', copies: 'Copies owned',
+    wishBtn: 'Wishlist', ownBtn: 'I own this card', from: 'From', avg7: '7-day avg', avg30: '30-day avg', foil: 'Foil',
+    curve: 'Price history', seeded: 'The first points are Cardmarket\'s 30-day, 7-day and 1-day averages; after that, one reading per day.',
+    cmView: 'View on Cardmarket', cmSearch: 'Search on Cardmarket', official: 'Official card page (rules, versions)', art: (a) => `Art: ${a}`,
+    worth: (q, v) => (q > 1 ? `Your ${q} copies are worth ${v}` : `Your copy is worth ${v}`),
+    cost: 'Cost', power: 'Power', ram: 'RAM', level: 'Level', soul: 'Soul', traits: 'Traits', trigger: 'Trigger', jpOf: 'Japanese version', enOf: 'English version', enOnly: (ls) => `Printed only in ${ls.map((l) => LANG_EN[l]).join(' and ')}`,
+    chartWait: 'Not enough history to draw a curve yet. Prices are recorded every day.', chartNone: 'No Cardmarket price for this card yet.',
+    ranges: ['7D', '1M', '3M', '1Y', 'All'], chartAria: (a, b, c, d) => `Price from ${a} to ${b}, from ${c} to ${d}`,
+    language: 'App language', langToast: 'App in English',
+    ls: {
+      tab: 'Lists', fav: 'Favourite list', intro: 'Every card of the edition sorted by licence, colour, type, rarity or character, across all sets.',
+      groups: { fav: 'Favourites', collection: 'Card types', rarity: 'Rarities', color: 'Colours', licence: 'Licences', character: 'Characters' },
+      chars: 'Characters of this licence', allChars: (n) => `The most printed characters (at least ${n} cards). All the others are on their licence page.`,
+    },
+    bd: {
+      tab: 'Binders', layout: 'Page layout', limit: 'One custom binder in the free version. Unlimited binders with the Supporter status.', plusUnlimited: 'Unlimited binders', plusMore: '… and other perks (profile picture, banner, gold frame)', plusBtn: 'Support WeissDex', plusHint: 'After your donation, the Supporter status is turned on for your account (put your WeissDex ID in the message).',
+      value: (a, b) => `~${a} / ~${b}`, owned: (a, b) => `${a}/${b} card${b > 1 ? 's' : ''} owned`, settings: 'Binder settings', prices: 'Show prices',
+      mine: 'My binders', master: 'Master Set binders', new: 'New binder', name: 'Binder name', namePh: 'My Legends, Arasaka binder…', color: 'Cover', create: 'Create',
+      pages: (n) => `${n} page${n > 1 ? 's' : ''}`, fill: 'Fill with…', fillList: 'a list', fillOwned: 'my owned cards', addPage: 'Add a page',
+      rename: 'Rename', del: 'Delete binder', delConfirm: 'Tap again to delete', pick: 'Choose a card', pickPh: 'Card name or number', remove: 'Remove',
+      none: 'Create your first binder to store your cards like in a real binder.', readOnly: 'Automatic binder: the set in order, missing cards in grey.', created: 'Binder created', deleted: 'Binder deleted',
+    },
+    cd: {
+      mine: 'My decks', tourney: 'Tournaments', community: 'Community', by: (a) => `by ${a}`, official: 'See on the official site', none: 'No decks yet.', updated: (d) => `updated ${d}`,
+      communityHint: 'The most liked public decks from the official deck builder (cyberpunktcg.com/decks), collected every day.',
+      tourneyHint: 'Public decks that announce a tournament result (Showdown, Brawl, Top 8, 1st place…), until official tournament decks are published.',
+    },
+    lb: {
+      title: 'Leaderboard', friends: 'Friends', world: 'World', mValue: 'Value', mCards: 'Cards', mSets: 'Verified sets', me: 'me',
+      signIn: 'Sign in to your WeissDex account to see the leaderboard.', rulesNeeded: 'Leaderboard unavailable: update the Firestore rules.',
+      line: (c, u, v) => `${c} card${c > 1 ? 's' : ''} · ${u} unique · ${v} set${v > 1 ? 's' : ''} ✓`,
+      optin: 'Appear in the world leaderboard (your username, card count, value and verified sets)',
+      needPseudo: 'First choose a username in', joined: 'You now appear in the world leaderboard', left: 'You no longer appear in the world leaderboard',
+      emptyWorld: 'Nobody in the world leaderboard yet. Join with the box above!', emptyFriends: 'Add friends to compare collections.',
+      mySets: 'My complete sets', verifiedCount: (v, n) => `${v}/${n} verified`, verify: 'Verify', allVerified: 'All your complete sets are verified ✓', noneComplete: 'No complete set yet.',
+      rule: 'Anti-cheat: a complete set only counts in “Verified sets” with a live photo of its most expensive card, recognised by the app. Photos are visible to other players (tap a username).',
+      setDone: 'Set complete!', setVerified: ' Verified ✓', setToVerify: ' Verify it with a photo of its most expensive card so it counts in the leaderboard.',
+      notComplete: 'This set is not complete yet.', camTitle: 'Verification photo', camHint: (s) => `Most expensive card of ${s}: hold it straight, inside the frame.`,
+      aim: 'Put the card in the frame: the photo is taken automatically once it is recognised.', shoot: 'Take photo', noCamera: 'Camera unavailable: verification needs a live photo taken with the phone.',
+      notRecognised: 'Card not recognised: get closer, avoid glare, hold it straight.', wrongCard: (n) => `That is not the right card (${n}).`,
+      verified: (s) => `${s}: set verified ✓`, proofsIntro: 'Live photos of the most expensive cards of their complete sets.', noProofs: 'No verified set.',
+      myCards: (m) => `My cards worth over ${m} € to verify`, pending: (v) => `${v} not counted yet`, cardsAllOk: 'All your expensive cards are verified ✓ (or you have none).',
+      cardRule: (m) => `Anti-cheat: a card worth ${m} € or more only counts in the leaderboard value after a live photo recognised by the app. Other cards count straight away.`,
+      cardOk: 'Verified ✓: it counts in your leaderboard value', cardNeeds: (m) => `Over ${m} €: verify it with a photo so it counts in the leaderboard`,
+      camHintCard: 'Hold the card straight, inside the frame.', cardVerified: (n) => `${n}: card verified ✓`, verifiedCards: 'Verified cards',
+      adminRemove: 'Remove from leaderboard', adminDone: 'Account removed from the leaderboard (and its verification photos)',
+    },
+    wl: {
+      new: 'New list', lists: 'My lists:', rename: 'Rename', del: 'Delete list', namePrompt: 'List name (e.g. Johnny, Red deck, Gifts…)',
+      created: (n) => `List “${n}” created`, deleted: 'List deleted (cards stay in your wishlist)', delConfirm: (n) => `Delete the list “${n}”? The cards stay in your wishlist.`,
+      budget: (n) => `Budget for “${n}”`, empty: 'This list is empty', emptyHint: 'Open a card from your wishlist and tap the list name to add it.',
+      intro: 'Tip: create lists (“+ New list”) to sort your wishlist by theme and see each list\'s budget.',
+    },
+    al: {
+      title: 'Price alerts', count: (n) => `${n} active`, label: 'Alert when price drops below (€)', off: 'No alert', hit: 'Price reached!', waiting: 'Waiting',
+      howTo: 'Open a card from your wishlist and enter a price: WeissDex tells you when the Cardmarket trend drops below it.',
+      enable: 'Enable notifications on this phone', enabled: 'Notifications enabled', denied: 'Notifications denied', unsupported: 'This browser does not support notifications',
+      notifOn: 'Notifications enabled: you will be alerted even with the app closed when Android allows it (installed app), otherwise next time you open it.',
+      notifBlocked: 'Notifications blocked: allow them in your browser settings for this site.',
+      askNotif: 'Alert saved. Enable notifications in your Wishlist to be alerted on your phone.',
+      toast: (n) => `🔔 ${n} price alert${n > 1 ? 's' : ''} reached: see your wishlist`,
+      notifTitle: (n, p) => `${n} is at ${p}`, notifBody: (t) => `Your WeissDex alert: below ${t}. Tap to see your wishlist.`,
+    },
+    sh: {
+      title: 'Share deck', signIn: 'Sign in to your WeissDex account to share or import a deck.', rulesNeeded: 'Sharing unavailable: update the Firestore rules.', error: 'Could not share right now, try again.',
+      hint: (n) => `Give this code to your friends: they will find “${n}” in Decks → Import with a code.`, copy: 'Copy code', send: 'Send…', copied: 'Code copied',
+      update: 'If you edit your deck, tap Share again to update the shared version (same code).', stop: 'Stop sharing', stopped: 'The code no longer works',
+      message: (n, c) => `My Weiss Schwarz deck “${n}” on WeissDex — code: ${c}`, importTitle: 'Import with a code', codePh: '6-character code', open: 'View deck',
+      badCode: 'This code is not valid (6 letters or digits).', notFound: (c) => `No shared deck with code ${c}.`, by: (p) => `Deck by ${p}`, codeLabel: 'code',
+      import: 'Copy to my decks', imported: 'Deck added to your decks', friendDecks: 'Their decks',
+    },
+    buy: {
+      btn: 'Buy', setBtn: 'Cardmarket shopping list for missing cards', deckBtn: (n) => `Buy the ${n} missing card${n > 1 ? 's' : ''} on Cardmarket`,
+      title: 'Cardmarket shopping list', from: { wish: 'wishlist cards you don\'t own yet', set: 'missing cards from the set', deck: 'deck cards you are missing' },
+      filters: 'Filters', one: '1 copy', playset: 'Playset (3)', lang: 'Language', cond: 'Minimum condition', max: 'Max price per card (€)', noMax: 'None', version: 'Version', normal: 'Normal',
+      estimate: 'Estimated total (trend prices)', summary: (n, k) => `${n} card${n > 1 ? 's' : ''} to buy · ${k} line${k > 1 ? 's' : ''}`,
+      offers: 'See filtered offers', add: 'Add', none: 'Nothing to buy: you have everything!', noneFiltered: 'No card matches these filters.',
+      copy: 'Copy list for Cardmarket', copied: 'List copied: paste it into your Cardmarket Wants', openWants: 'Open my Wants on Cardmarket',
+      howTitle: 'Find a seller with the most cards',
+      how: ['Copy the list with the button above.', 'On Cardmarket, open <b>Wants</b>, create a list and paste the cards (add by list / decklist). Set the language and minimum condition for the whole list.', 'Run the <b>Shopping Wizard</b>: Cardmarket finds the seller(s) who have the most of your cards at the best price, shipping included.', 'For a specific card, “See filtered offers” opens its offers already filtered by language, condition and version.'],
+    },
+    cp: { title: 'My copies', cond: 'Condition', foilOnly: 'printed in foil', foilPrice: (v) => `foil ≈ ${v}`, more: (n) => `+ ${n} more copies (Near Mint)`,
+      conds: { MT: 'Mint (MT)', NM: 'Near Mint (NM)', EX: 'Excellent (EX)', GD: 'Good (GD)', LP: 'Light Played (LP)', PL: 'Played (PL)', PO: 'Poor (PO)' } },
+    news: {
+      title: 'News', unread: (n) => `${n} unread`, new: 'New', read: 'Read the article', empty: 'No news yet.',
+      intro: 'The latest Cyberpunk TCG news from the official blog. Updated every day.',
+    },
+    ex: {
+      tab: 'Extra', cats: { staff: 'Staff cards', other: 'Off-set cards' }, catHint: { staff: 'Given to employees, never sold in stores.' },
+      note: 'These cards are not on Cardmarket: their price is an estimate from eBay listings, updated by hand.',
+      priceNote: (v, d, s) => `Estimated ${v} from ${s} (${d}) — no Cardmarket price.`,
+      estimate: 'Estimated price (eBay)', ebayLive: 'See listings on eBay', ebaySold: 'See sold listings on eBay',
+    },
+    dk: {
+      ownCount: 'My cards counted:', ownToast: (l) => `Owned cards counted: ${l}`,
+      title: 'Decks', new: 'New deck', untitled: 'Untitled deck', defaultName: (n) => `My deck ${n}`, namePh: 'Deck name', cancel: 'Cancel',
+      empty: 'No decks yet', emptyHint: 'Build decks with the official rules: 3 Legends, 40 to 50 cards, RAM checked automatically.',
+      cards: (n) => `${n} card${n > 1 ? 's' : ''}`, legal: 'Legal deck', notLegal: 'Deck not legal yet', toFix: 'to fix',
+      missing: (n, v) => `You are missing ${n} card${n > 1 ? 's' : ''} (≈ ${v})`, complete: 'You own every card in this deck.',
+      cLegends: (n) => `Legends: ${n}/3, all different`, sameLegend: 'Two Legends share the same name.',
+      cSize: (n) => `Deck: ${n} cards (40 to 50, Legends not counted)`, needMore: (n) => `At least ${n} more card${n > 1 ? 's' : ''}.`, tooMany: (n) => `${n} card${n > 1 ? 's' : ''} too many.`,
+      cCopies: 'Max 3 copies per card (all printings)', cRam: 'Card RAM ≤ RAM of its colour', overRam: (n) => `${n} card${n > 1 ? 's need' : ' needs'} too much RAM.`,
+      ramLegend: 'RAM per colour, from your Legends', isLegend: 'Legend', ramShort: (r, c) => `RAM ${r} ${c}`, max3: 'Already 3', sideFull: 'Sideboard full',
+      legends: 'Legends', addLegend: 'Legend', removeLegend: 'Remove this Legend', pickLegend: 'Choose a Legend', legSearch: 'Search a Legend',
+      main: 'Deck', side: 'Sideboard', mainHint: 'Add cards from the list below.', sideHint: 'Tournament sideboard: 7 cards you can swap between games.',
+      curve: 'Cost curve', addCards: 'Add cards', searchPh: 'Card name or number', mine: 'My cards', allColors: 'All colours',
+      own: (o, n) => `you own ${o}/${n}`, refine: (n) => `${n} cards: refine your search to see the rest.`,
+      export: 'Copy list', copied: 'Deck list copied', duplicate: 'Duplicate this deck', duplicated: 'Deck duplicated',
+      del: 'Delete this deck', delSure: 'Tap again to delete', deleted: 'Deck deleted',
+      rulesTitle: 'Deck-building rules',
+      rules: ['Exactly <b>3 Legends</b>, with different names.', '<b>40 to 50 cards</b> in the deck, Legends not counted.', '<b>Max 3 copies</b> of the same card, all printings combined.', '<b>RAM</b>: each colour starts at 0; each Legend adds its RAM to its colour. A card cannot need more RAM than its colour\'s limit.', 'In tournaments: a <b>7-card sideboard</b>.'],
+      rulesNeeded: 'Decks kept on this phone: update the Firestore rules to sync them.',
+    },
+    gr: {
+      tab: 'Graded', tabCards: 'Cards', add: 'Add a graded card', edit: 'Edit slab', addThis: 'Add a graded copy', youHave: (n) => `${n} graded`,
+      empty: 'No graded cards yet', emptyHint: 'Add your PSA, Beckett, CGC, PCA, Collect Aura… slabs with their grade, cert number and a photo.',
+      kSlabs: 'Slabs', kPaid: 'Paid', kValue: 'Estimated value', noSale: 'No sale',
+      valueNote: 'Estimated value = median of the last 3 sold prices you logged for the same card, language, company and grade.',
+      card: 'Card', findCard: 'Card name or number (e.g. MS01 008)', change: 'Change', company: 'Grading company', other: 'Other',
+      grade: 'Grade', cert: 'Cert number', certPh: 'On the slab label', certShort: 'Cert', verify: 'verify',
+      purchase: 'Purchase', paid: 'Price paid (€)', date: 'Date', photo: 'Slab photo', optional: 'optional',
+      photoAdd: 'Take or choose a photo', photoChange: 'Change photo', photoDel: 'Remove photo', photoErr: 'Could not read this photo.',
+      photoHint: 'It replaces the drawn slab. Kept on your phone and in your account when signed in. Checked automatically before it is shared (no nudity, blood or violence).',
+      save: 'Save', del: 'Delete this slab', delSure: 'Tap again to delete', added: 'Slab added', saved: 'Slab updated', deleted: 'Slab deleted',
+      estimate: 'Estimated value', paidOn: (p, d) => `Paid ${p}${d ? ` on ${d}` : ''}`,
+      curve: 'Sold prices', salesCount: (n) => `${n} sale${n > 1 ? 's' : ''} logged`, salePrice: 'Sold price (€)', addSale: 'Sale', delSale: 'Delete this sale', saleAdded: 'Sale added to the curve',
+      chartWait: 'Add at least two sold prices to draw the curve.',
+      ebayNote: 'eBay does not let apps read sold listings automatically (reserved for approved partners). Open them with the button below, then log the prices here: the curve and value update.',
+      ebay: 'See sold listings on eBay', pc: 'Graded prices on PriceCharting', seeCard: 'See the card page',
+      rulesNeeded: 'Graded cards kept on this phone: update the Firestore rules to sync them.',
+    },
+    paidLabel: 'Bought at / card', paidHint: 'Difference with the price', paidVs: 'Difference:', boughtFor: (v) => `bought for ${v}`,
+    paidSum: (n, v) => `Purchase price logged for ${n} card${n > 1 ? 's' : ''}: ${v}`,
+    zoom: 'View card in 3D', v3d: { flip: 'Flip', reset: 'Face front', tip: 'Drag to rotate the card · double-tap to flip it' },
+    otherCopies: (n, l) => `+ ${n} cop${n > 1 ? 'ies' : 'y'} in ${l} (switch with EN | JP)`, colLang: (l) => `${l.toUpperCase()} collection`,
+    cardLanguage: 'Card edition', cardLangHint: 'The EN | JP button on the home screen does the same: sets, names and images of that edition. Each edition has its own collection.',
+    cardLangToast: (l) => ({ en: 'Cards: English edition', ja: 'Cards: Japanese edition' }[l]),
+    langHint: 'WeissDex menus, buttons and texts.',
+    hiddenSets: (n, l) => `${n} set${n > 1 ? 's are' : ' is'} not printed in ${LANG_EN[l]}.`, showOther: (l) => `See ${l.toUpperCase()} cards`,
+    noCardsLang: (l) => `No card from this set is printed in ${LANG_EN[l]}.`,
+    prev: 'Previous card', next: 'Next card',
+    fr: {
+      title: 'Friends', gate: 'Sign in to your WeissDex account to add friends and see their collections.',
+      choose: 'Choose your username', chooseHint: 'Friends will add you with this username. 3 to 20 characters: lowercase letters, digits, . _ -',
+      pseudoPh: 'e.g. trainer_77', save: 'Save', pseudoRule: 'Invalid username: 3 to 20 characters (a-z, 0-9, . _ -).', pseudoTaken: 'This username is taken, try another one.', pseudoSaved: 'Username saved',
+      add: 'Add a friend', yourPseudo: 'Your username:', addPh: 'Your friend\'s username', send: 'Send',
+      privacy: 'Accepted friends can see your collection and wishlist. Nobody else.',
+      notFound: (p) => `No account with the username “${p}”.`, self: 'That\'s your own username!', already: (p) => `@${p} is already your friend.`,
+      sent: 'Request sent', accepted: 'Friend added', removed: 'Friend removed', denied: 'Action refused: check that the Firestore rules are up to date.', error: 'Something went wrong, try again.',
+      requests: 'Requests', wants: 'wants to be your friend', accept: 'Accept', decline: 'Decline',
+      mine: 'My friends', see: 'See their collection', open: 'View', remove: 'Remove', confirm: 'Confirm?',
+      none: 'No friends yet', noneHint: 'Add a friend with their username: they will have to accept.',
+      loading: 'Loading their collection…', cantSee: 'Collection unavailable', cantSeeHint: 'You may no longer be friends, or the Firestore rules are not up to date.',
+      fAll: 'Their collection', fTrade: 'They have, I don\'t', fGive: 'They want, I have', fWish: 'Their wishlist', emptyFilter: 'Nothing in this filter yet.',
+      tagMine: 'I have it', tagWant: 'On my wishlist',
+    },
+    scan: { btn: 'Scan', title: 'Scan a card', starting: 'Opening the camera…', aim: 'Place the card in the frame, flat, without glare.', holding: 'Got it… hold still.', photo: 'Choose a photo', torch: 'Torch',
+      denied: 'Camera access denied. Allow it in your browser settings, or choose a photo of the card.', noCamera: 'No camera available. Choose a well-framed photo of the card instead.', indexErr: 'Could not load the scanner. Check your connection and try again.',
+      unsure: 'Not 100 % sure: check it is the right one.', owned: (q) => `You already have ${q}.`, versions: 'Other versions of this card:', notIt: 'Not this one?',
+      add: '+1 I have it', open: 'View card', again: 'Scan again', added: (q) => `Added: you have ${q}` },
+    inst: { android: 'Open Chrome\'s ⋮ menu then “Install app” (or “Add to Home screen”): WeissDex then opens full screen like a real app.', title: 'Install WeissDex', pitch: 'Like a real app: an icon on your screen, full screen without a browser, and it works offline.', btn: 'Install', ios: 'On iPhone: tap Share (the square with the arrow), then “Add to Home Screen”.', done: 'WeissDex is installed! Open it from your home screen.' },
+    crop: { titleAvatar: 'Crop picture', titleBanner: 'Crop banner', zoom: 'Zoom', hint: 'Drag to move the image, pinch or use the slider to zoom.', cancel: 'Cancel', ok: 'Done' },
+    mod: {
+      bannerAdd: 'Add a banner', bannerChange: 'Change banner', bannerEmpty: 'Your profile banner', bannerSaved: 'Banner saved', bannerRemoved: 'Banner removed',
+      checking: 'Checking the image…', policy: 'Every image is checked automatically before it is published: no nudity, sexual content, blood, dead bodies or violence.',
+      rejected: (c) => `Image refused: ${c}. Choose another image.`, unavailable: 'The image could not be checked right now, so it was not published. Try again later.',
+      cats: { sexual: 'sexual content', nudity: 'nudity', gore: 'blood or injuries', violence: 'violence', hate: 'hateful content', drugs: 'drugs', other: 'inappropriate content' },
+      adminTitle: 'Remove an account\'s picture and banner (reported image):', adminRemove: 'Remove', adminDone: 'Account images removed',
+    },
+    adm: { title: 'Administration', role: 'admin role', idPh: 'Donor\'s WeissDex ID', activate: 'Activate', remove: 'Remove', listTitle: 'Active supporters', none: 'No supporters yet.', on: 'Supporter activated', off: 'Supporter removed', badId: 'Invalid ID: copy it from the donor\'s “My account”.', denied: 'Refused: the Firestore rules do not recognise this account as admin yet (publish the new rules).' },
+    support: 'Support WeissDex', supportHint: 'WeissDex is free and fan-made. A donation keeps it alive and unlocks extras (profile picture, gold frame).',
+    supporter: 'Supporter', supporterThanks: 'Thanks for your support! Your extras are active.',
+    myId: 'Your WeissDex ID', myIdHint: 'Add it to your donation message to receive your extras.', copy: 'Copy', copiedId: 'ID copied',
+    avatar: 'Profile picture', avatarChange: 'Change picture', avatarAdd: 'Add a picture', avatarRemove: 'Remove', avatarLocked: 'For WeissDex supporters only.', avatarSaved: 'Picture saved', avatarRemoved: 'Picture removed', avatarErr: 'Could not save the picture. Try again.', avatarDenied: 'Pictures are for supporters: your status is not active yet.',
+    petSetting: 'Capri walks around the app', yes: 'On', no: 'Off', petHint: 'Tap her to react, tap twice to chat, or drag her onto a card. Long press (or × on PC) to hide her.',
+    petHide: 'Hide Capri', petBye: 'Ok, I\'m vanishing… *bzzt*', petHidden: 'Capri is hidden until you reopen the app. For good: Settings.',
+    capriSpoil: (on) => `S2 spoilers: ${on ? 'on' : 'off'}`, capriReset: 'Clear', capriSend: 'Send', capriStop: 'Stop', capriPh: 'Write to Capri…', capriTyping: 'linking engrams', capriListen: 'Listen',
+    capriHello: '*static* … Ah, the link holds. Hey, choom. I\'m Capri: a bunch of minds stitched into one, no body, just a chip and a lot of curiosity. What do you want to know?',
+    capriSuggest: ['Who are you, Capri?', 'What is an engram?', 'What is it like to have no body?', 'What do you think of Arasaka?', 'Do you like Cyberpunk cards?'],
+    capriSuggestSpoil: ['Where do you really come from?', 'What happened with Talia?', 'How do you feel about D?', 'How does season 2 end?'],
+    capriGateTitle: 'Chat with Capri', capriGate: 'The AI from Edgerunners 2 answers your questions, in character. Sign in to your WeissDex account to talk to her.',
+    capriNoCloud: 'Chatting with Capri needs WeissDex accounts (Firebase).',
+    capriFoot: 'Unofficial fan chatbot · Capri © CD Projekt / Studio Trigger · answers generated by Gemini (Google), they may contain mistakes.',
+    capriErr: { busy: '*static* Gemini\'s servers are overloaded right now. Try again in a minute.', timeout: '*static* Gemini is not answering right now (too slow). Try again in a moment.', denied: 'Google is refusing access for now (project key permissions). Send the detail below to your developer.', region: 'Free Gemini is not available from your region.', notEnabled: 'Capri is not connected yet: enable “AI Logic” (Gemini Developer API) in the Firebase console.', quota: '*static* I talked too much today: the free limit is reached. Try again later.', offline: 'No internet connection: I can\'t hear a thing, choom.', model: 'No Gemini model available right now. Try again later.', blocked: '*static* My circuits refuse to go there. Ask me something else.', other: '*static* The link dropped. Try again in a moment.' },
+    account: 'My account', accountShort: 'Account',
+    accountPitch: 'Sign in to find your collection, wishlist and favourite sets on all your devices, and add friends. Without an account, everything stays on this phone.',
+    google: 'Continue with Google', or: 'or', email: 'Email address', password: 'Password (at least 6 characters)',
+    signIn: 'Sign in', signUp: 'Create an account', forgot: 'Forgot password?', resetSent: 'Password reset email sent',
+    signedAs: (e) => `Signed in: ${e}`, signOut: 'Sign out', signedOut: 'Signed out. Your collection stays on this phone.',
+    welcome: 'Signed in: your collection is synced',
+    syncOk: (t) => `Collection synced${t ? ` · ${t}` : ''}`, syncing: 'Syncing…', syncErr: 'Sync is not possible right now. Your changes are kept on this phone and will be sent later.',
+    syncInfo: (n, w) => `${n} ${plural(n, 'card or product', 'cards and products')} owned, ${w} in wishlist: saved to your account.`,
+    deleteAcc: 'Delete my WeissDex data', deleteConfirm: 'Confirm deletion', deleteNote: 'Deletes the online copy of your WeissDex collection (collection, graded cards, leaderboard, nickname and friends). The collection stays on this phone.',
+    deleted: 'WeissDex data deleted',
+    authErr: { 'auth/invalid-email': 'Invalid email address.', 'auth/missing-password': 'Enter a password.', 'auth/weak-password': 'Password too short: at least 6 characters.', 'auth/email-already-in-use': 'An account already exists with this email: sign in.', 'auth/invalid-credential': 'Wrong email or password.', 'auth/wrong-password': 'Wrong email or password.', 'auth/user-not-found': 'No account with this email.', 'auth/too-many-requests': 'Too many attempts: try again in a few minutes.', 'auth/network-request-failed': 'No internet connection.', 'auth/requires-recent-login': 'For security, sign out and sign in again before deleting your account.', 'auth/unauthorized-domain': 'This site is not yet authorised in Firebase (authorised domains).', default: 'Something went wrong, please try again.' },
+    disclaimer: 'WeissDex is an unofficial fan app, not affiliated with Bushiroad. Weiss Schwarz, card names and artwork belong to Bushiroad and the licence holders. Card database: WS Lounge (CC0 licence), based on the official card lists; images: ws-tcg.com / en.ws-tcg.com. Prices: Cardmarket (trend, updated daily).',
+    storage: (n, w) => `Your collection is saved on this device (${n} cards owned, ${w} in wishlist). Export it to back it up or move it to another phone.`,
+    export: 'Export my collection (copy)', import: 'Import a backup file', dataLine: (n, m, d) => `Data: ${n} cards, ${m} sets · Cardmarket prices from ${d}.`, close: 'Close',
+    copied: 'Backup copied', selectCopy: 'Select the text to copy it', imported: 'Collection imported', badFile: 'Invalid file: choose a WeissDex export',
+    loadError: 'Could not load the cards', loadErrorHint: 'Check that data/catalog.json and data/prices.json exist, then reload the page.',
+    rarity: {}, type: {}, color: {},
+  },
+};
+
+// ---------- Icônes ----------
+const I = {
+  back: '<svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m11 6-6 6 6 6"/></svg>',
+  star: '<svg viewBox="0 0 24 24"><path d="m12 3.5 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/></svg>',
+  sort: '<svg viewBox="0 0 24 24"><path d="M8 4v16"/><path d="m4 8 4-4 4 4"/><path d="M16 20V4"/><path d="m12 16 4 4 4-4"/></svg>',
+  filter: '<svg viewBox="0 0 24 24"><path d="M4 7h10"/><path d="M18 7h2"/><circle cx="16" cy="7" r="2"/><path d="M4 17h2"/><path d="M10 17h10"/><circle cx="8" cy="17" r="2"/></svg>',
+  gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  speaker: '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+  heartSmall: '<svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>',
+  camera: '<svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.8"/></svg>',
+  bolt: '<svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
+  slab: '<svg viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M5 7.5h14"/><rect x="8" y="10" width="8" height="9" rx="1"/></svg>',
+  bell: '<svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
+  trophy: '<svg viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v4M8.5 20h7M10 17h4v3h-4z"/></svg>',
+  copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>',
+  share: '<svg viewBox="0 0 24 24"><circle cx="18" cy="5.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="18.5" r="2.5"/><path d="m8.2 10.8 7.6-4.1M8.2 13.2l7.6 4.1"/></svg>',
+  cart: '<svg viewBox="0 0 24 24"><path d="M3 4h2.5l2.2 11h10.6l2-8H6.6"/><circle cx="9.5" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/></svg>',
+  flip: '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8.5"/><path d="M20 4v4.5h-4.5"/><path d="M20 12a8 8 0 0 1-13.7 5.7L4 15.5"/><path d="M4 20v-4.5h4.5"/></svg>',
+  zoom: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M10.5 7.5v6M7.5 10.5h6"/></svg>',
+  mail: '<svg viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/></svg>',
+  globe: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>',
+  person: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
+  heart: '<svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>',
+  own: '<svg viewBox="0 0 24 24"><rect x="6" y="3.5" width="12" height="17" rx="2"/><path d="m9.5 12 2 2 3.5-4"/></svg>',
+  listIcon: '<svg viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>',
+  gridIcon: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+  ext: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 10 14"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>',
+};
+
+// ---------- Raretés & couleurs (sigles imprimés sur les cartes Weiss Schwarz) ----------
+// L'ordre sert aux filtres ; les raretés propres à une licence (BDR, JJR, HLP…) sont ajoutées à la fin, par ordre alphabétique.
+const RARITY_ORDER = ['C', 'U', 'R', 'RR', 'RR+', 'RRR', 'RRR+', 'SR', 'SP', 'SPM', 'SSP', 'SSP+', 'SEC', 'SEC+', 'OFR', 'HLP', 'SIR', 'XR', 'HYR', 'UR',
+  'PR', 'PR+', 'TD', 'TDP', 'CC', 'CR', 'N', 'RE', 'P'];
+let RARITIES = [...RARITY_ORDER];
+const normR = (r) => String(r ?? '').replace(/＋/g, '+').replace(/[＊*⁑⁂]+$/, '');
+// niveau de rareté (illustration de série, effet holographique) : 0 commune … 2 foil (RRR, SR) … 3 SP / rares de licence … 4 SSP / SEC
+function rarityTier(r) {
+  if (!r) return 0;
+  const b = normR(r);
+  if (/^(SSP|SEC|XR|SIR|HYR|UR|LUXO|PXR|SPYR|AVGR|μR|MSP)\+?$/.test(b) || /^(SP|OFR)\+$/.test(b)) return 4;
+  if (/SP/.test(b) || /^(OFR|HLP|FP|LRP|IGP|IFP)$/.test(b) || (/^[A-Zμ]{2,5}R$/.test(b) && !/^(RR|RRR|CR|SR|HR|HRR|PR|TR)$/.test(b))) return 3;
+  if (/^(RR|RRR|SR|HR|HRR)\+?$/.test(b)) return 2;
+  if (/^(R|PR|CR|RE|P|TD)\+?$/.test(b)) return 1;
+  return 0;
+}
+const RARITY_HEX = {
+  C: '#8e96b2', U: '#6fd38a', R: '#5b8cff', RR: '#b36bff', 'RR+': '#b36bff', RRR: '#c86bff', 'RRR+': '#c86bff', SR: '#ff9f2e',
+  SP: '#ffcb05', SPM: '#ffcb05', SSP: '#ff5fa2', 'SSP+': '#ff5fa2', SEC: '#ff4d8d', 'SEC+': '#ff4d8d', OFR: '#3fd8c8', HLP: '#3fd8c8',
+  PR: '#3fb6ff', 'PR+': '#3fb6ff', TD: '#9aa6b5', TDP: '#9aa6b5', CC: '#8e96b2', CR: '#5b8cff', N: '#8e96b2', RE: '#7aa2ff',
+};
+const TIER_HEX = ['#8e96b2', '#5b8cff', '#b36bff', '#ffcb05', '#ff5fa2'];
+const rarityHex = (r) => RARITY_HEX[r] ?? RARITY_HEX[normR(r)] ?? TIER_HEX[rarityTier(r)];
+const rarityStyle = (r) => (r ? `style="--rc:${rarityHex(r)}"` : '');
+// raretés de la base, dans l'ordre connu (appelé au chargement des cartes)
+function buildRarities() {
+  const present = new Set(catalog.cards.map((c) => c.rarity).filter(Boolean));
+  RARITIES = [...RARITY_ORDER.filter((r) => present.has(r)), ...[...present].filter((r) => !RARITY_ORDER.includes(r)).sort()];
+}
+// les couleurs de Weiss Schwarz (jaune, vert, rouge, bleu ; violet pour quelques cartes spéciales)
+const FACTION = { Yellow: '#f5d142', Green: '#4fc26b', Red: '#ff5a5a', Blue: '#4f9dff', Purple: '#b46bd6' };
+
+// ---------- Stockage local (collection, souhaits, préférences) ----------
+const KEY = 'weissdex:v1';
+const defaults = () => ({ owned: {}, wish: [], fav: [], prefs: { lang: 'fr', homeMode: 'list', setMode: 'cards', sort: 'num', own: 'all', rarity: null, valueRange: 90 } });
+function loadUser() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return defaults();
+    const u = JSON.parse(raw);
+    const d = defaults();
+    const prefs = { ...d.prefs, ...(u.prefs ?? {}) };
+    return { ...d, ...u, prefs };
+  } catch { return defaults(); }
+}
+const user = loadUser();
+const wish = new Set(user.wish);
+const fav = new Set(user.fav);
+// signature de ce qui est synchronisé avec le compte (collection, souhaits, favoris ; pas les préférences d'affichage)
+const collectionSig = () => JSON.stringify([Object.entries(user.owned).filter(([, q]) => q > 0).sort(), [...wish].sort(), [...fav].sort()]);
+let lastSig = collectionSig();
+let onCollectionChange = null;   // branché par le classement (mise à jour de ma ligne publique)
+function save() {
+  user.wish = [...wish]; user.fav = [...fav];
+  const sig = collectionSig();
+  if (sig !== lastSig) { lastSig = sig; cloudChanged(); onCollectionChange?.(); }
+  try { localStorage.setItem(KEY, JSON.stringify(user)); } catch { /* stockage indisponible */ }
+}
+
+// ---------- Langue & formats ----------
+// langue de l'appli (menus, textes) — choisie dans les Réglages ou avec le bouton 🌐
+const UI_LANGS = [['fr', 'Français'], ['en', 'English']];
+let lang = UI_LANGS.some(([k]) => k === user.prefs.lang) ? user.prefs.lang : 'fr';
+let L = TEXT[lang];
+// langue des cartes (bouton FR | EN) : séries imprimées en français ou en anglais, noms et images correspondants
+let cardLang = CARD_LANGS.includes(user.prefs.cardLang) ? user.prefs.cardLang : 'en';
+let fmt;
+function setFormats() {
+  const loc = lang === 'en' ? 'en-GB' : 'fr-FR';
+  fmt = {
+    eur: new Intl.NumberFormat(loc, { style: 'currency', currency: 'EUR' }),
+    pct: new Intl.NumberFormat(loc, { style: 'percent', maximumFractionDigits: 1, signDisplay: 'exceptZero' }),
+    day: new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' }),
+    date: new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', year: 'numeric' }),
+    loc,
+  };
+}
+setFormats();
+const eur = (v) => (v == null ? '—' : fmt.eur.format(v));
+const pct = (v) => (v == null || !isFinite(v) ? '' : fmt.pct.format(v));
+const rarityLabel = (r) => L.rarity[r] ?? r;
+const typeLabel = (t) => L.type[t] ?? t;
+const colorLabel = (c) => L.color[c] ?? c;
+const NAME_KEY = { fr: 'name', en: 'nameEn', ja: 'nameJa' };
+const nameIn = (c, l) => (l === 'fr' ? c.name : c[NAME_KEY[l]] ?? c.name);
+const cardName = (c) => nameIn(c, cardLang);
+// la carte existe-t-elle dans la langue choisie ? (le scellé est affiché dans les deux)
+const inCardLang = (c) => (isSealed(c) ? sealedLangs(c).includes(cardLang) : !c.languages || c.languages.includes(cardLang));
+// langues d'un produit scellé : indiquées dans sealed.json, sinon celles des cartes de sa série (ex. bêta = anglais seulement)
+const setLangCache = new Map();
+function sealedLangs(it) {
+  if (it.languages) return it.languages;
+  if (!it.set) return ['en', 'ja'];
+  if (!setLangCache.has(it.set)) setLangCache.set(it.set, [...new Set((cardsBySet.get(it.set) ?? []).flatMap((c) => c.languages ?? ['en']))]);
+  const l = setLangCache.get(it.set);
+  return l.length ? l : ['en', 'ja'];
+}
+const setCards = (code) => (cardsBySet.get(code) ?? []).filter(inCardLang);
+const setName = (s) => nameIn(s, cardLang);
+const blockName = (b) => { const s = seriesById.get(b); return s ? (lang === 'en' ? s.nameEn ?? s.name : s.name) : L.blocks[b] ?? b; };
+
+// ---------- Données ----------
+let catalog = { sets: [], cards: [] };
+let priceFile = { prices: {} };
+let sealed = [];
+let config = { cardmarket: { gameSlug: 'WeissSchwarz', languageIds: { en: 1, fr: 2, ja: 7 } } };
+const cardsById = new Map();
+const cardsBySet = new Map();
+const seriesById = new Map();
+const setsByCode = new Map();
+
+async function loadData() {
+  // version autonome : données intégrées dans la page (<script type="application/json" id="data/…">)
+  const embedded = (p) => { const el = document.getElementById(p); return el ? Promise.resolve(JSON.parse(el.textContent)) : null; };
+  const get = (p) => embedded(p) ?? fetch(p, { cache: 'no-cache' }).then((r) => { if (!r.ok) throw new Error(p); return r.json(); });
+  let sealedFile, extraFile;
+  get('data/news.json').then((n) => { news = n.items ?? []; newsInit(); if (currentRender === renderNews) renderNews(); }).catch(() => {});
+  // cartes : un fichier par édition (data/cards-en.json, data/cards-ja.json) ; celle affichée d'abord, l'autre juste après
+  let first;
+  [catalog, priceFile, config, sealedFile, extraFile, first] = await Promise.all([get('data/catalog.json'), get('data/prices.json').catch(() => ({ prices: {} })), get('data/config.json').catch(() => config), get('data/sealed.json').catch(() => ({ items: [] })), get('data/extras.json').catch(() => ({ items: [] })), get(`data/cards-${cardLang}.json`).catch(() => null)]);
+  const inline = catalog.cards ?? [];
+  catalog.cards = [];
+  // cartes hors séries : prix estimé saisi à la main (pas de cote Cardmarket)
+  extras = extraFile.items ?? [];
+  for (const c of extras) {
+    cardsById.set(c.id, c);
+    if (c.price?.value != null && !priceFile.prices[c.id]) priceFile.prices[c.id] = { trend: c.price.value, history: [[c.price.date, c.price.value]], manual: true };
+  }
+  renderSupportSide();
+  sealed = sealedFile.items ?? [];
+  for (const it of sealed) cardsById.set(it.id, it);
+  for (const sr of catalog.series ?? []) seriesById.set(sr.id, sr);
+  for (const st of catalog.sets) setsByCode.set(st.code, st);
+  addCards([...inline, ...(first?.cards ?? [])]);
+  document.getElementById('demoBanner').hidden = !catalog.demo;
+  const rest = (catalog.split ?? []).filter((l) => l !== cardLang);
+  cardsReady = Promise.all(rest.map((l) => get(`data/cards-${l}.json`).then((f) => addCards(f.cards ?? [])).catch(() => {}))).then(() => {
+    // l'autre édition est là : on rafraîchit les vues qui mélangent les deux (cotes, amis, classement)
+    if ([renderValues, renderFriendCurrent, renderLeaderboard].includes(currentRender) && sheet.hidden) currentRender();
+  });
+}
+let cardsReady = Promise.resolve();
+// ordre des numéros Weiss Schwarz : cartes de booster (E001, puis ses versions SP, SSP…), decks de démarrage (TE01), promos (PE01)
+function numKey(n) {
+  const m = String(n).match(/^([A-Z]*?)E?(\d+)(.*)$/i);
+  if (!m) return [9, 0, String(n)];
+  const pre = m[1].toUpperCase();
+  return [pre === '' ? 0 : pre === 'T' ? 1 : pre === 'P' ? 2 : 3, Number(m[2]), `${pre}${m[3]}`];
+}
+const byCardNumber = (a, b) => { const x = numKey(a.number), y = numKey(b.number); return x[0] - y[0] || x[1] - y[1] || x[2].localeCompare(y[2], 'en'); };
+// code imprimé de la carte (ex. 5HY/W83-E001)
+const cardCode = (c) => (c.id.includes('_') ? c.id.replace('_', '/') : `${printCode(c.set)}-${c.number}`);
+// ajoute des cartes au catalogue (édition déduite de la série), triées par numéro dans chaque série
+function addCards(list) {
+  const touched = new Set();
+  for (const c of list) {
+    if (cardsById.has(c.id)) continue;
+    c.languages ??= setOf(c.set)?.languages ?? [String(c.set).startsWith('J-') ? 'ja' : 'en'];
+    catalog.cards.push(c);
+    cardsById.set(c.id, c);
+    if (!cardsBySet.has(c.set)) cardsBySet.set(c.set, []);
+    cardsBySet.get(c.set).push(c);
+    touched.add(c.set);
+  }
+  for (const code of touched) cardsBySet.get(code).sort(byCardNumber);
+  buildRarities();
+  setLangCache.clear(); setArtCache.clear(); dynLists = null; listCache.clear(); printsByName = null;
+}
+
+const P = (id) => priceFile.prices[id];
+const hasPrices = () => Object.keys(priceFile.prices ?? {}).length > 0;
+const price = (id) => P(id)?.trend ?? null;
+// collection séparée par langue : clé « id » = exemplaires FR, « id@en » = exemplaires EN (le scellé n'a qu'une clé)
+const okey = (id, l = cardLang) => {
+  const c = cardsById.get(id);
+  if (id.includes('@') || isSealed(c ?? {})) return id;
+  const eff = c?.languages?.length && !c.languages.includes(l) ? c.languages[0] : l;
+  return eff === 'fr' ? id : `${id}@${eff}`;
+};
+// éditions dans lesquelles la carte existe (une clé de collection par édition)
+const langsOf = (id) => { const c = cardsById.get(id); return c && !isSealed(c) && c.languages?.length ? c.languages : ['fr']; };
+const ownedOf = (map, id, l = cardLang) => map?.[okey(id, l)] ?? 0;
+const qty = (id, l = cardLang) => ownedOf(user.owned, id, l);
+const qtyAll = (id) => langsOf(id).reduce((a, l) => a + qty(id, l), 0);
+// état et version de chaque exemplaire : copies[clé de collection] = [{ c: 'NM', f: 1 si foil }, …] (autant que d'exemplaires)
+const CONDS = ['MT', 'NM', 'EX', 'GD', 'LP', 'PL', 'PO'];
+function copiesOf(id, l = cardLang) {
+  if (!user.copies || typeof user.copies !== 'object') user.copies = {};
+  const n = qty(id, l), list = (user.copies[okey(id, l)] ?? []).slice(0, n);
+  while (list.length < n) list.push({ c: 'NM', f: 0 });
+  return list;
+}
+function setCopies(id, list, l = cardLang) {
+  const k = okey(id, l);
+  const clean = list.slice(0, qty(id, l)).map((x) => ({ c: CONDS.includes(x.c) ? x.c : 'NM', f: x.f ? 1 : 0 }));
+  if (clean.every((x) => x.c === 'NM' && !x.f)) delete user.copies[k]; else user.copies[k] = clean;
+}
+const foilPrice = (id) => P(id)?.trendFoil ?? null;
+// valeur des exemplaires d'une langue : prix foil pour les exemplaires foil quand Cardmarket le donne
+const valueOf = (id, l = cardLang) => copiesOf(id, l).reduce((a, x) => a + ((x.f ? foilPrice(id) : null) ?? price(id) ?? 0), 0);
+const valueAll = (id) => langsOf(id).reduce((a, l) => a + valueOf(id, l), 0);
+// anciennes données (une seule quantité par carte) : les cartes qui n'existent qu'en anglais passent en « @en », le reste reste en FR
+function migrateOwned(map) {
+  if (!map) return map;
+  for (const [k, n] of Object.entries(map)) {
+    const c = cardsById.get(k);
+    if (!c || isSealed(c) || !c.languages || c.languages.includes('fr')) continue;
+    const l = c.languages[0];
+    map[`${k}@${l}`] = Math.max(map[`${k}@${l}`] ?? 0, n); delete map[k];
+  }
+  return map;
+}
+const setOf = (code) => setsByCode.get(code);
+const setTotal = (s) => setCards(s.code).length;
+const ownedIn = (code) => setCards(code).filter((c) => qty(c.id) > 0).length;
+const ownedAll = (code) => (cardsBySet.get(code) ?? []).filter((c) => qty(c.id) > 0).length;
+const printCode = (code) => setOf(code)?.print ?? code;
+const isSealed = (c) => c.kind === 'sealed';
+const isExtra = (c) => c?.kind === 'extra';
+let extras = [];
+const itemCode = (c) => (isSealed(c) ? c.print ?? (c.set ? printCode(c.set) : '') : printCode(c.set));
+const allItems = () => [...catalog.cards, ...extras, ...sealed];
+
+function valueAt(hist, day) {
+  let v = null;
+  for (const [d, p] of hist) { if (d <= day) v = p; else break; }
+  return v;
+}
+// Historique des prix : un fichier par série (data/history/<série>.json), chargé à la demande.
+// Sans historique chargé, les variations utilisent les moyennes 7 j / 30 j de Cardmarket.
+const histLoads = new Map();
+function ensureHistory(codes, done) {
+  if (!priceFile.split) return false;
+  const todo = [...new Set(codes)].filter((c) => c && !histLoads.has(c));
+  const pending = [...new Set(codes)].map((c) => histLoads.get(c)).filter((x) => x && !x.done);
+  if (!todo.length && !pending.length) return false;
+  for (const code of todo) {
+    const pr = fetch(`data/history/${encodeURIComponent(code)}.json`).then((r) => (r.ok ? r.json() : {})).catch(() => ({})).then((map) => {
+      for (const [id, h] of Object.entries(map)) if (priceFile.prices[id] && Array.isArray(h)) priceFile.prices[id].history = h;
+      pr.done = true;
+    });
+    histLoads.set(code, pr);
+  }
+  Promise.all([...new Set(codes)].map((c) => histLoads.get(c))).then(() => done?.());
+  return true;
+}
+function change(id, days) {
+  const h = P(id)?.history;
+  if (!h || h.length < 2) {
+    const p = P(id), base = days <= 7 ? p?.avg7 : p?.avg30;
+    return p?.trend && base && days <= 30 ? p.trend / base - 1 : null;
+  }
+  const last = h[h.length - 1];
+  const from = new Date(parseDay(last[0]) - days * 864e5).toISOString().slice(0, 10);
+  const before = valueAt(h, from) ?? h[0][1];
+  return before ? last[1] / before - 1 : null;
+}
+// Lien Cardmarket : page exacte de la carte (avec filtre de langue), sinon recherche par nom
+function cmUrl(card) {
+  const { gameSlug = 'WeissSchwarz', languageIds = { en: 1, fr: 2, ja: 7 } } = config.cardmarket ?? {};
+  if (card.cardmarket?.path && isSealed(card)) return { url: `https://www.cardmarket.com/${lang}/${gameSlug}/${card.cardmarket.path}`, exact: true };
+  const printedIn = card.languages?.includes(cardLang) ? cardLang : card.languages?.[0] ?? 'en';
+  if (card.cardmarket?.path) return { url: `https://www.cardmarket.com/${lang}/${gameSlug}/${card.cardmarket.path}?language=${languageIds[printedIn]}`, exact: true };
+  // carte japonaise : Cardmarket ne vend presque que l'édition anglaise, on cherche sa version anglaise
+  const twin = card.languages?.includes('ja') ? cardsById.get(twinId(card)) : null;
+  const nm = encodeURIComponent(twin?.name ?? card.nameEn ?? card.name);
+  if (twin?.cardmarket?.idExpansion) return { url: `https://www.cardmarket.com/${lang}/${gameSlug}/Products/Singles?idExpansion=${twin.cardmarket.idExpansion}&searchString=${nm}`, exact: false };
+  // extension connue (relevée par update-prices.mjs) : liste de la série filtrée sur le nom de la carte
+  if (card.cardmarket?.idExpansion) return { url: `https://www.cardmarket.com/${lang}/${gameSlug}/Products/Singles?idExpansion=${card.cardmarket.idExpansion}&searchString=${nm}`, exact: true };
+  return { url: `https://www.cardmarket.com/${lang}/${gameSlug}/Products/Search?searchString=${nm}`, exact: false };
+}
+
+// ---------- Images ----------
+const artCache = new Map();
+function sealedArt(it) {
+  const words = String(cardName(it)).split(' ');
+  const lines = [''];
+  for (const w of words) { if ((lines[lines.length - 1] + ' ' + w).trim().length > 18 && lines.length < 4) lines.push(w); else lines[lines.length - 1] = (lines[lines.length - 1] + ' ' + w).trim(); }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600">
+<polygon points="300,60 520,170 520,430 300,540 80,430 80,170" fill="#1d2337" stroke="#f5e50b" stroke-width="6"/>
+<polygon points="300,60 520,170 300,280 80,170" fill="#2b3250"/><line x1="300" y1="280" x2="300" y2="540" stroke="#f5e50b" stroke-width="4" stroke-opacity=".5"/>
+${lines.map((l, i) => `<text x="300" y="${340 + i * 40}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="30" fill="#eceef6">${esc(l)}</text>`).join('')}</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+function placeholderArt(card) {
+  const k = `${card.id}|${lang}`;
+  if (artCache.has(k)) return artCache.get(k);
+  if (isSealed(card)) { const u = sealedArt(card); artCache.set(k, u); return u; }
+  const c1 = FACTION[card.color] ?? '#6f8fe6';
+  const rc = rarityHex(card.rarity);
+  const lines = [''];
+  for (const w of String(cardName(card)).split(' ')) { if ((lines[lines.length - 1] + ' ' + w).trim().length > 16 && lines.length < 3) lines.push(w); else lines[lines.length - 1] = (lines[lines.length - 1] + ' ' + w).trim(); }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 630 880">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}" stop-opacity=".55"/><stop offset=".55" stop-color="#141826"/><stop offset="1" stop-color="#0b0d14"/></linearGradient></defs>
+<rect width="630" height="880" rx="34" fill="#0b0d14"/><rect x="18" y="18" width="594" height="844" rx="22" fill="url(#g)"/>
+<text x="46" y="78" font-family="sans-serif" font-weight="700" font-size="36" fill="#eceef6">${esc(itemCode(card))}-${esc(card.number ?? '')}</text>
+${card.level != null ? `<circle cx="560" cy="66" r="40" fill="${c1}"/><text x="560" y="82" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="44" fill="#0b0d14">${card.level}</text>` : ''}
+${card.power != null ? `<text x="46" y="820" font-family="sans-serif" font-weight="700" font-size="44" fill="#eceef6">${card.power}</text>` : ''}
+${lines.map((l, i) => `<text x="46" y="${200 + i * 64}" font-family="sans-serif" font-weight="700" font-size="56" fill="#eceef6">${esc(l)}</text>`).join('')}
+<polygon points="315,420 405,472 405,576 315,628 225,576 225,472" fill="none" stroke="${rc}" stroke-width="6"/></svg>`;
+  const uri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  artCache.set(k, uri);
+  return uri;
+}
+// Images des listes officielles de Bushiroad : <dossier de la série (ib)><fichier>.png
+// fichier = code de la carte avec « / » et « - » remplacés par « _ » (en minuscules sur le site japonais), sauf exception (c.im)
+const cardFile = (c, s) => { const f = c.id.replace(/-/g, '_'); return s?.languages?.[0] === 'ja' ? f.toLowerCase() : f; };
+function officialImage(c) {
+  if (c.image) return c.image;
+  if (c.noimg) return null;
+  const s = setOf(c.set);
+  if (c.im?.startsWith('http')) return c.im;
+  if (!s?.ib) return null;
+  return `${s.ib}${c.im ?? cardFile(c, s)}${c.im && /\.\w{3,4}$/.test(c.im) ? '' : '.png'}`;
+}
+// vignette réduite (WebP) par le service d'images libre wsrv.nl (data/config.json → images.thumb ; vide = image d'origine)
+const thumbOf = (u, w) => { const t = config.images?.thumb ?? 'https://wsrv.nl/?url={url}&w={w}&output=webp&q=80'; return u && t && !u.startsWith('data:') ? t.replace('{url}', encodeURIComponent(u.replace(/^https?:\/\//, ''))).replace('{w}', w) : u; };
+// la même carte dans l'autre édition : « E001 » en anglais ↔ « 001 » en japonais (même code de série)
+function twinId(c) {
+  const i = c.id.lastIndexOf('-'), head = c.id.slice(0, i), n = c.id.slice(i + 1);
+  return c.languages?.includes('ja') ? `${head}-${n.replace(/^([A-Z]*?)(?=\d)/, '$1E')}` : `${head}-${n.replace(/^([A-Z]*?)E(?=\d)/, '$1')}`;
+}
+function twinImage(c) {
+  const id = twinId(c), t = cardsById.get(id);
+  if (t) return t.id === c.id ? null : officialImage(t);
+  // carte pas encore chargée : adresse déduite du code, dans le dossier de la série de l'autre édition
+  const ja = c.languages?.includes('ja'), s = setOf(ja ? c.set.replace(/^J-/, '') : `J-${c.set}`);
+  return s?.ib ? `${s.ib}${cardFile({ id }, s)}.png` : null;
+}
+function imageIn(c, l, hi = false) {
+  const u = officialImage(c);
+  return u ? (hi ? u : thumbOf(u, 300)) : null;
+}
+const imageOf = (c, hi = false) => imageIn(c, cardLang, hi);
+// Images de secours, essayées l'une après l'autre si la première ne charge pas :
+// l'image d'origine (si la vignette échoue) ou la vignette (si l'originale échoue), puis la même carte dans l'autre édition.
+function imageAlts(c, hi = false) {
+  if (isSealed(c) || !c.number) return [];
+  const u = officialImage(c), t = twinImage(c);
+  return [u && (hi ? thumbOf(u, 700) : u), t && thumbOf(t, hi ? 700 : 300), t].filter(Boolean);
+}
+
+// Version autonome : images regroupées par série et par langue dans packs/<nom>.json (chargées à la demande)
+const packs = new Map();
+function ensurePack(name) {
+  if (packs.has(name)) return;
+  packs.set(name, null);
+  fetch(`packs/${name}.json`).then((r) => r.json()).then((map) => {
+    packs.set(name, map);
+    for (const img of document.querySelectorAll(`img[data-pack="${CSS.escape(name)}"]`)) if (map[img.dataset.key]) img.src = map[img.dataset.key];
+  }).catch(() => packs.delete(name));
+}
+function cardImg(card, eager = false, hi = false) {
+  const ph = placeholderArt(card);
+  const img = imageOf(card, hi);
+  let src = img || ph;
+  let extra = '';
+  if (img?.startsWith('pack:')) {
+    const name = img.slice(5);
+    const map = packs.get(name);
+    src = map?.[card.id] ?? ph;
+    if (!map) { extra = ` data-pack="${esc(name)}" data-key="${esc(card.id)}"`; ensurePack(name); }
+  }
+  const alts = imageAlts(card, hi).filter((u) => u !== src);
+  if (src === ph && alts.length) src = alts.shift();
+  if (alts.length) extra += ` data-alt="${esc(alts.join(' '))}"`;
+  return `<img src="${esc(src)}" alt="${esc(cardName(card))}" ${eager ? '' : 'loading="lazy"'} decoding="async" data-ph="${esc(ph)}"${extra}>`;
+}
+// image en échec : un nouvel essai direct sur le serveur, puis le visuel de remplacement
+document.addEventListener('error', (e) => {
+  const img = e.target;
+  if (img.tagName !== 'IMG' || !img.dataset.ph || img.src === img.dataset.ph) return;
+  if (img.dataset.alt) { const [next, ...rest] = img.dataset.alt.split(' '); img.dataset.alt = rest.join(' '); if (!rest.length) delete img.dataset.alt; img.src = next; return; }
+  if (!img.dataset.retried && !img.src.startsWith('data:')) {
+    img.dataset.retried = '1';
+    const u = new URL(img.src, location.href); u.searchParams.set('r', Date.now());
+    img.src = u.href;
+  } else img.src = img.dataset.ph;
+}, true);
+
+// ---------- Rendu des cartes ----------
+function cardTile(c) {
+  const q = qty(c.id);
+  return `<div class="card ${q ? 'owned' : 'missing'}" data-cid="${esc(c.id)}">
+    <button class="card-img" data-open="${esc(c.id)}" aria-label="${esc(cardName(c))}, ${esc(printCode(c.set))} ${esc(c.number)}">${cardImg(c)}</button>
+    ${price(c.id) != null ? `<span class="price num">${eur(price(c.id))}</span>` : ''}
+    <div class="actions">
+      <button class="mini-btn heart" data-wish="${esc(c.id)}" aria-pressed="${wish.has(c.id)}" aria-label="${L.wishBtn}">${I.heart}</button>
+      <button class="mini-btn own" data-own="${esc(c.id)}" aria-pressed="${q > 0}" aria-label="${L.ownBtn}">${I.own}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>
+    </div>
+  </div>`;
+}
+function sealedTile(it) {
+  const q = qty(it.id);
+  const code = itemCode(it);
+  return `<div class="sealed ${q ? 'owned' : ''}" data-cid="${esc(it.id)}" data-kind="sealed">
+    <button class="sealed-img" data-open="${esc(it.id)}" aria-label="${esc(cardName(it))}">${cardImg(it)}${it.pack ? `<span class="pack-badge num">×${it.pack}</span>` : ''}</button>
+    <div class="sealed-info"><strong>${esc(cardName(it))}</strong><span>${code ? `<b class="print">${esc(code)}</b> · ` : ''}${esc(L.catOne[it.category] ?? '')}</span></div>
+    <div class="sealed-foot">
+      <span class="sprice num">${price(it.id) != null ? eur(price(it.id)) : `<small>${L.noPrice}</small>`}</span>
+      <button class="mini-btn heart" data-wish="${esc(it.id)}" aria-pressed="${wish.has(it.id)}" aria-label="${L.wishBtn}">${I.heart}</button>
+      <button class="mini-btn own" data-own="${esc(it.id)}" aria-pressed="${q > 0}" aria-label="${L.ownBtn}">${I.own}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>
+    </div>
+  </div>`;
+}
+function compactTile(c) {
+  const q = qty(c.id);
+  return `<div class="card ${q ? 'owned' : 'missing'}" data-cid="${esc(c.id)}" data-kind="compact">
+    <button class="card-img" data-open="${esc(c.id)}" aria-label="${esc(cardName(c))}">${cardImg(c)}<span class="num-badge num">${esc(c.number)}</span></button>
+  </div>`;
+}
+function cardRow(c, days = 30, extra = '') {
+  const q = qty(c.id);
+  const ch = change(c.id, days);
+  return `<div class="row" data-cid="${esc(c.id)}" data-kind="row" data-days="${days}">
+    <button class="thumb ${isSealed(c) ? 'is-sealed' : ''}" data-open="${esc(c.id)}" aria-label="${esc(cardName(c))}">${cardImg(c)}</button>
+    <button class="meta" data-open="${esc(c.id)}">
+      <strong>${esc(cardName(c))}</strong>
+      <span>${isSealed(c) ? `${itemCode(c) ? `${esc(itemCode(c))} · ` : ''}${esc(L.catOne[c.category] ?? '')}` : `${esc(printCode(c.set))} · ${esc(c.number)}${c.rarity ? ` · <span class="rarity" ${rarityStyle(c.rarity)}>${esc(rarityLabel(c.rarity))}</span>` : ''}`}</span>
+    </button>
+    <div class="rprice num">${eur(price(c.id))}${ch != null ? `<small class="${ch >= 0 ? 'up' : 'down'}">${pct(ch)} ${days} ${lang === 'en' ? 'd' : 'j'}</small>` : ''}${extra}</div>
+    <button class="mini-btn own" data-own="${esc(c.id)}" aria-pressed="${q > 0}" aria-label="${L.ownBtn}">${I.own}${q > 1 ? `<span class="qty">${q}</span>` : ''}</button>
+  </div>`;
+}
+function refreshCard(id) {
+  const c = cardsById.get(id);
+  for (const el of document.querySelectorAll(`[data-cid="${CSS.escape(id)}"]`)) {
+    const kind = el.dataset.kind;
+    el.outerHTML = kind === 'row' ? cardRow(c, Number(el.dataset.days) || 30) : kind === 'compact' ? compactTile(c) : kind === 'sealed' ? sealedTile(c) : cardTile(c);
+  }
+}
+
+// ---------- Vues ----------
+const view = document.getElementById('view');
+const topbar = document.getElementById('topbar');
+let currentRender = () => {};
+
+const langBtn = () => `<button class="lang-btn" data-action="cardlang" aria-label="${L.cardLanguage}" title="${L.cardLanguage}">${CARD_LANGS.map((l) => `<span ${cardLang === l ? 'class="on"' : ''}>${LANG_TAG[l]}</span>`).join('')}</button>`;
+const globeBtn = () => `<button class="icon-btn" data-action="language" aria-label="${L.language}" title="${L.language}">${I.globe}</button>`;
+function setTopbar(html) { topbar.innerHTML = html; }
+function seg(name, value, options) {
+  return `<div class="seg" role="group">${options.map(([v, label]) => `<button data-seg="${name}" data-value="${v}" aria-pressed="${value === v}">${label}</button>`).join('')}</div>`;
+}
+// illustration de chaque série : sa carte phare (iconique, secrète ou nova rare la plus chère), dans la langue des cartes
+const setArtCache = new Map();
+function setArt(code) {
+  const k = `${code}|${cardLang}`;
+  // nouvelle série sans image de carte (encore) : visuel de son booster ou de son scellé
+  if (!setArtCache.has(k)) setArtCache.set(k, bestArt(setCards(code)) ?? sealed.find((it) => it.set === code && it.image && !String(it.image).startsWith('pack:'))?.image ?? null);
+  return setArtCache.get(k);
+}
+const artStyle = (code) => { const u = setArt(code); return u ? `style="--art:url('${esc(u)}')"` : ''; };
+// symbole et logo de la série (s'ils sont fournis par la base), masqués s'ils n'existent pas
+// symbole absent en .webp : essai en .png, sinon la pastille affiche le sigle de la série
+const SYM_ERR = "if(this.src.endsWith('.webp')){this.src=this.src.slice(0,-5)+'.png'}else{this.parentNode&&this.parentNode.classList.remove('has-sym');this.remove()}";
+const setSymbol = (s) => (s.symbol ? `<img class="set-sym" src="${esc(s.symbol)}.webp" alt="" loading="lazy" onerror="${SYM_ERR}">` : '');
+// pastille claire de la série : son symbole officiel, sinon son code imprimé
+const setPrint = (s) => s.print ?? s.code.replace(/^J-/, '').replace(/^tk-/, 'TK ').toUpperCase().slice(0, 6);
+const setBadge = (s) => `<span class="set-code${s.symbol ? ' has-sym' : ''}">${setSymbol(s)}<em>${esc(setPrint(s))}</em></span>`;
+const setLogo = (s) => { const u = s.logo?.[cardLang] ?? s.logo?.en ?? Object.values(s.logo ?? {})[0]; return u ? `<img class="set-logo" src="${esc(u)}.webp" alt="" onerror="if(this.src.endsWith('.webp')){this.src=this.src.slice(0,-5)+'.png'}else{this.remove()}">` : ''; };
+function setHero(s) {
+  const total = setTotal(s), own = ownedIn(s.code), p = total ? own / total : 0;
+  return `<div class="set-hero" ${artStyle(s.code)}>
+    <div class="set-hero-text">${setLogo(s)}<span class="title-code">${esc(setPrint(s))}</span><h2>${esc(setName(s))}</h2>${s.releaseDate ? `<small>${fmt.date.format(parseDay(s.releaseDate))}</small>` : ''}</div>
+    <div class="set-hero-prog num"><b>${Math.floor(p * 100)} %</b><span>${own}/${total}</span></div>
+    <div class="bar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>
+  </div>`;
+}
+function progressRow(s) {
+  const total = setTotal(s); const own = ownedIn(s.code);
+  const p = total ? own / total : 0;
+  return `<a class="set-row ${p >= 1 ? 'done' : ''}" href="#set-${esc(s.code)}" ${artStyle(s.code)}>
+    <div class="set-head">${setBadge(s)}<span class="set-name">${esc(setName(s))}</span>
+    <span class="set-count num">${own}<small>/${total}</small><b>${Math.floor(p * 100)} %</b></span></div>
+    <div class="bar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>
+  </a>`;
+}
+function progressTile(s) {
+  const total = setTotal(s); const own = ownedIn(s.code);
+  const p = total ? own / total : 0;
+  return `<a class="set-tile ${p >= 1 ? 'done' : ''}" href="#set-${esc(s.code)}" ${artStyle(s.code)}>
+    <div class="set-head">${setBadge(s)}</div>
+    <span class="set-name">${esc(setName(s))}</span>
+    <span class="big num">${Math.floor(p * 100)} %</span>
+    <div class="bar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>
+    <span class="set-meta num"><span>${own}/${total}</span><span>${s.releaseDate ? fmt.date.format(parseDay(s.releaseDate)) : ''}</span></span>
+  </a>`;
+}
+
+let homeQuery = '';
+function homeTopbar(withMode) {
+  const mode = user.prefs.homeMode;
+  setTopbar(`<h1>${L.home}</h1>${withMode ? `<button class="icon-btn" data-action="home-mode" aria-label="${L.toggleView}">${mode === 'grid' ? I.listIcon : I.gridIcon}</button>` : ''}${langBtn()}${news.length ? newsBtn() : ''}${globeBtn()}${accountBtn()}<button class="icon-btn" data-action="settings" aria-label="${L.settings}">${I.gear}</button>`);
+}
+const homeTabs = (active) => `<div class="seg" role="tablist">${[['home', L.setsTab], ...(sealed.some(inCardLang) ? [['sealed', L.sealed]] : []), ['lists', L.ls.tab], ...(extras.some(inCardLang) ? [['extra', L.ex.tab]] : [])].map(([h, l]) => `<button data-nav="${h}" aria-pressed="${active === h}">${l}</button>`).join('')}</div>`;
+function renderSealed() {
+  homeTopbar(false);
+  const updated = priceFile.updatedAt ? fmt.date.format(parseDay(priceFile.updatedAt)) : '';
+  const cats = ['booster', 'box', 'case', 'deck', 'kit'];
+  view.innerHTML = `<div class="stack">
+    ${homeTabs('sealed')}
+    ${cats.map((cat) => { const list = sealed.filter((s) => s.category === cat && inCardLang(s)).sort((a, b) => a.order - b.order); return list.length ? `<h2 class="section-title">${L.cats[cat]}</h2><div class="sealed-grid">${list.map(sealedTile).join('')}</div>` : ''; }).join('')}
+    <p class="note">${L.sealedNote(updated)}</p>
+  </div>`;
+}
+function renderExtra() {
+  homeTopbar(false);
+  const shown = extras.filter(inCardLang);
+  if (!shown.length) { location.hash = '#home'; return; }
+  const cats = [...new Set(shown.map((c) => c.category ?? 'other'))];
+  view.innerHTML = `<div class="stack">
+    ${homeTabs('extra')}
+    ${cats.map((cat) => `<h2 class="section-title">${esc(L.ex.cats[cat] ?? L.ex.cats.other)}</h2><p class="note" style="margin:-6px 0 0">${esc(L.ex.catHint[cat] ?? '')}</p>
+      <div class="cards">${shown.filter((c) => (c.category ?? 'other') === cat).map(cardTile).join('')}</div>`).join('')}
+    <p class="note">${L.ex.note}</p>
+  </div>`;
+}
+function renderHome() {
+  homeTopbar(true);
+  const mode = user.prefs.homeMode;
+  const q = homeQuery.trim().toLowerCase();
+  const hidden = catalog.sets.filter((s) => (cardsBySet.get(s.code) ?? []).length && !setTotal(s)).length;
+  const sets = [...catalog.sets]
+    .filter((s) => setTotal(s) > 0) // séries sans carte dans cette édition (ou encore vides dans la base) : masquées
+    .filter((s) => !q || [s.name, s.nameEn, s.nameJa, s.code, s.print, blockName(s.block)].some((x) => String(x ?? '').toLowerCase().includes(q)))
+    // ordre calculé à l'import (date Cardmarket ou numéro de sortie) : les plus récentes en tête
+    .sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
+  const groups = new Map();
+  const favSets = sets.filter((s) => fav.has(s.code));
+  if (favSets.length) groups.set(L.favorites, favSets);
+  for (const s of sets) { const b = blockName(s.block ?? 'new'); if (!groups.has(b)) groups.set(b, []); groups.get(b).push(s); }
+  const body = [...groups].map(([name, list], i) => `<details class="block" ${i < 3 || q ? 'open' : ''}>
+      <summary>${esc(name)}${I.chevron}</summary>
+      ${mode === 'grid' ? `<div class="set-tiles">${list.map(progressTile).join('')}</div>` : `<div class="set-list">${list.map(progressRow).join('')}</div>`}
+    </details>`).join('');
+  view.innerHTML = `<div class="stack">
+    ${installBanner()}
+    ${homeTabs('home')}
+    <input class="search" id="setSearch" type="search" placeholder="${L.searchSet}" value="${esc(homeQuery)}" autocomplete="off">
+    ${body || `<div class="empty"><strong>${L.noSet}</strong></div>`}
+    ${hidden ? `<p class="note lang-note">${L.hiddenSets(hidden, cardLang)} <button class="link-btn" data-action="cardlang">${L.showOther(LANG_TAG[nextLang(cardLang)])}</button></p>` : ''}
+  </div>`;
+}
+
+let showFilters = false;
+const SORTS = ['num', 'price-desc', 'price-asc', 'name'];
+function sortCards(list, sort) {
+  const l = [...list];
+  if (sort === 'price-desc') l.sort((a, b) => (price(b.id) ?? -1) - (price(a.id) ?? -1));
+  else if (sort === 'price-asc') l.sort((a, b) => (price(a.id) ?? 1e9) - (price(b.id) ?? 1e9));
+  else if (sort === 'name') l.sort((a, b) => cardName(a).localeCompare(cardName(b), fmt.loc));
+  return l;
+}
+function filterCards(list) {
+  const { own, rarity } = user.prefs;
+  return list.filter((c) => (own === 'all' || (own === 'owned') === qty(c.id) > 0) && (!rarity || c.rarity === rarity));
+}
+function filtersPanel(list) {
+  const { own, rarity, sort } = user.prefs;
+  const rs = RARITIES.filter((r) => list.some((c) => c.rarity === r));
+  return `<div class="stack" style="gap:8px">
+    <div class="chips">${SORTS.map((v) => `<button class="chip" data-pref="sort" data-value="${v}" aria-pressed="${sort === v}">${L.sorts[v]}</button>`).join('')}</div>
+    <div class="chips">${['all', 'owned', 'missing'].map((v) => `<button class="chip" data-pref="own" data-value="${v}" aria-pressed="${own === v}">${L.ownF[v]}</button>`).join('')}</div>
+    ${rs.length ? `<div class="chips"><button class="chip" data-pref="rarity" data-value="" aria-pressed="${!rarity}">${L.allRarities}</button>${rs.map((r) => `<button class="chip" data-pref="rarity" data-value="${esc(r)}" aria-pressed="${rarity === r}"><span class="rarity" ${rarityStyle(r)}>${esc(rarityLabel(r))}</span></button>`).join('')}</div>` : ''}
+  </div>`;
+}
+function cardsBlock(list, mode) {
+  if (!list.length) return `<div class="empty"><strong>${L.noCards}</strong>${L.noCardsHint}</div>`;
+  if (mode === 'list') return `<div class="rows">${list.map((c) => cardRow(c)).join('')}</div>`;
+  if (mode === 'grid') return `<div class="cards compact">${list.map(compactTile).join('')}</div>`;
+  return `<div class="cards">${list.map(cardTile).join('')}</div>`;
+}
+
+// recherche dans une série : nom FR/EN, numéro, rareté (sans accents ni majuscules)
+let setQuery = '', setQueryCode = '';
+const fold = (t) => String(t ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+function matchQuery(c, q) {
+  if (!q) return true;
+  const hay = fold([c.name, c.nameEn, c.nameJa, c.number, rarityLabel(c.rarity), typeLabel(c.type)].join(' '));
+  return fold(q).split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
+}
+function renderSet(code) {
+  const s = setOf(code);
+  if (!s) { location.hash = '#home'; return; }
+  if (setQueryCode !== code) { setQueryCode = code; setQuery = ''; }
+  const all = setCards(code);
+  const list = sortCards(filterCards(all).filter((c) => matchQuery(c, setQuery)), user.prefs.sort);
+  const value = all.reduce((a, c) => a + qty(c.id) * (price(c.id) ?? 0), 0);
+  const full = all.reduce((a, c) => a + (price(c.id) ?? 0), 0);
+  const isFiltered = user.prefs.own !== 'all' || user.prefs.rarity;
+  setTopbar(`<a class="icon-btn" href="#home" aria-label="${L.back}">${I.back}</a>
+    <h1 class="small"><span class="title-code">${esc(setPrint(s))}</span>${esc(setName(s))}</h1>
+    <button class="icon-btn ${fav.has(code) ? 'on' : ''}" data-fav="${esc(code)}" aria-pressed="${fav.has(code)}" aria-label="${L.favSet}">${I.star}</button>
+    <button class="icon-btn" data-action="cycle-sort" aria-label="${L.changeSort}">${I.sort}</button>
+    <button class="icon-btn ${showFilters || isFiltered ? 'on' : ''}" data-action="filters" aria-label="${L.filters}" aria-expanded="${showFilters}">${I.filter}</button>`);
+  view.innerHTML = `<div class="stack">
+    ${setHero(s)}
+    ${seg('setMode', user.prefs.setMode, [['cards', L.cards], ['list', L.list], ['grid', L.grid]])}
+    ${showFilters ? filtersPanel(all) : ''}
+    ${setIsComplete(code) ? `<div class="set-done ${user.proofs[code] ? 'ok' : ''}">${I.trophy}<span><b>${L.lb.setDone}</b>${user.proofs[code] ? L.lb.setVerified : L.lb.setToVerify}</span>${user.proofs[code] ? '' : `<button class="chip" data-proof="${esc(code)}">${I.camera}<span>${L.lb.verify}</span></button>`}</div>` : ''}
+    <input class="search" id="setCardSearch" type="search" placeholder="${L.searchInSet}" value="${esc(setQuery)}" autocomplete="off" enterkeyhint="search">
+    <div class="toolbar num">
+      <span>${L.owned(ownedIn(code), setTotal(s))}</span><span class="grow"></span>
+      ${hasPrices() ? `<span>${L.myValue} : <b style="color:var(--fg)">${eur(value)}</b></span>` : `<span>${L.pricesSoon}</span>`}
+    </div>
+    ${!all.length && (cardsBySet.get(code) ?? []).length ? `<div class="empty"><strong>${L.noCardsLang(cardLang)}</strong><button class="btn-ghost" data-action="cardlang">${L.showOther(LANG_TAG[nextLang(cardLang)])}</button></div>` : cardsBlock(list, user.prefs.setMode)}
+    <p class="note num">${L.setNote(L.sorts[user.prefs.sort], list.length, hasPrices() ? eur(full) : '')}</p>
+    ${all.some((c) => !qty(c.id)) ? `<a class="btn-ghost buy-entry" href="#buy-set-${esc(code)}">${I.cart}<span>${L.buy.setBtn}</span></a>` : ''}
+  </div>`;
+}
+
+let colSet = '';
+function renderCollection() {
+  setTopbar(`<h1>${L.myCollection}</h1>${langBtn()}${cloud.enabled ? `<a class="icon-btn" href="#leaderboard" aria-label="${L.lb.title}" title="${L.lb.title}">${I.trophy}</a>` : ''}${cloud.enabled ? `<a class="chip friends-chip" href="#friends">${L.fr.title}<span class="fbadge" data-friends-badge ${fr.requests.length ? '' : 'hidden'}>${fr.requests.length || ''}</span></a>` : ''}`);
+  const owned = [...catalog.cards, ...extras].filter((c) => inCardLang(c) && qty(c.id) > 0);
+  const ownedSealed = sealed.filter((s) => qty(s.id) > 0 && inCardLang(s));
+  if (!owned.length && !ownedSealed.length) {
+    view.innerHTML = `<div class="stack">${colTabs('collection')}<div class="empty"><strong>${L.emptyCol}</strong>${L.emptyColHint}<a class="btn-ghost" href="#home" style="text-decoration:none">${L.browseSets}</a></div></div>`;
+    return;
+  }
+  const total = owned.reduce((a, c) => a + qty(c.id), 0);
+  const value = [...owned, ...ownedSealed].reduce((a, c) => a + valueOf(c.id), 0);
+  const sealedQty = ownedSealed.reduce((a, s) => a + qty(s.id), 0);
+  const withPaid = [...owned, ...ownedSealed].filter((c) => paidOf(c.id) != null);
+  const paidTot = withPaid.reduce((a, c) => a + qty(c.id) * paidOf(c.id), 0);
+  const diffTot = withPaid.reduce((a, c) => a + (paidDiff(c.id)?.diff ?? 0), 0);
+  const sets = [...catalog.sets].sort((a, b) => (a.order ?? 999) - (b.order ?? 999)).filter((s) => ownedAll(s.code) > 0);
+  const shown = colSet === '__sealed' ? [] : sortCards(owned.filter((c) => !colSet || c.set === colSet), 'price-desc');
+  const sealedShown = !colSet || colSet === '__sealed' ? ownedSealed : [];
+  view.innerHTML = `<div class="stack">
+    ${colTabs('collection')}
+    <div class="kpis">
+      <div class="stat"><small>${L.kCards}</small><b class="num">${total}</b></div>
+      <div class="stat"><small>${L.kUnique}</small><b class="num">${owned.length}</b></div>
+      <div class="stat"><small>${L.kValue}</small><b class="num">${eur(value)}</b></div>
+    </div>
+    ${withPaid.length ? `<p class="note num paid-sum">${L.paidSum(withPaid.length, eur(paidTot))} · ${diffHtml({ diff: diffTot, pct: paidTot ? diffTot / paidTot : null })}</p>` : ''}
+    <div class="chips"><button class="chip" data-colset="" aria-pressed="${!colSet}">${L.all}</button>${ownedSealed.length ? `<button class="chip" data-colset="__sealed" aria-pressed="${colSet === '__sealed'}">${L.sealed} · ${sealedQty}</button>` : ''}${sets.map((s) => `<button class="chip" data-colset="${esc(s.code)}" aria-pressed="${colSet === s.code}">${esc(s.print ?? s.code)} · ${ownedAll(s.code)}</button>`).join('')}</div>
+    ${shown.length ? `${seg('setMode', user.prefs.setMode, [['cards', L.cards], ['list', L.list], ['grid', L.grid]])}${cardsBlock(shown, user.prefs.setMode)}` : ''}
+    ${sealedShown.length ? `<h2 class="section-title">${L.sealed} · ${L.sealedCount(sealedQty)}</h2><div class="sealed-grid">${sealedShown.map(sealedTile).join('')}</div>` : ''}
+  </div>`;
+}
+
+function wishAlertsPanel(list) {
+  const withAlert = list.filter((c) => user.alerts[c.id] != null);
+  const ns = notifState();
+  return `<section class="panel alerts-panel"><h3>${I.bell}${L.al.title}<small>${L.al.count(withAlert.length)}</small></h3>
+    ${withAlert.length ? `<div class="al-list">${withAlert.map((c) => `<button class="al-item ${alertHit(c.id) ? 'hit' : ''}" data-open="${esc(c.id)}"><span>${esc(cardName(c))}</span><span class="num">${eur(price(c.id))} → <b>${eur(user.alerts[c.id])}</b></span></button>`).join('')}</div>` : `<p class="note" style="margin:0">${L.al.howTo}</p>`}
+    ${ns === 'granted' ? `<p class="note" style="margin:0">✓ ${L.al.notifOn}</p>` : ns === 'denied' ? `<p class="note" style="margin:0">${L.al.notifBlocked}</p>` : ns === 'unsupported' ? '' : `<button class="btn-ghost" data-action="notif-on">${I.bell}<span>${L.al.enable}</span></button>`}
+  </section>`;
+}
+// sous-listes de souhaits : wlists = [{ k, name, ids: [...] }] ; une carte peut être dans plusieurs listes
+if (!Array.isArray(user.wlists)) user.wlists = [];
+const wlById = (k) => user.wlists.find((l) => l.k === k);
+const wlCards = (l) => (l?.ids ?? []).filter((id) => wish.has(id));
+function wlNew(name, firstId) {
+  const n = String(name ?? '').trim().slice(0, 40);
+  if (!n) return null;
+  const l = { k: `w${Date.now().toString(36)}${Math.random().toString(36).slice(2, 4)}`, name: n, ids: firstId ? [firstId] : [] };
+  user.wlists.push(l); gSave();
+  return l;
+}
+function wlToggle(k, id) {
+  const l = wlById(k); if (!l) return;
+  l.ids = l.ids.includes(id) ? l.ids.filter((x) => x !== id) : [...l.ids, id];
+  if (l.ids.includes(id) && !wish.has(id)) { wish.add(id); save(); refreshCard(id); }
+  gSave();
+}
+const wlChips = (id) => `<div class="wl-line"><span class="note">${L.wl.lists}</span><div class="chips wrap">${user.wlists.map((l) => `<button class="chip" data-wl-toggle="${esc(l.k)}" data-id="${esc(id)}" aria-pressed="${l.ids.includes(id)}">${esc(l.name)}</button>`).join('')}<button class="chip" data-wl-new="${esc(id)}">+ ${L.wl.new}</button></div></div>`;
+function renderWishlist() {
+  let cur = wlById(user.prefs.wl) ? user.prefs.wl : '';
+  const sub = cur ? wlById(cur) : null;
+  setTopbar(`<h1>${L.wishlist}</h1>${wish.size ? `<a class="chip" href="#buy-${cur ? `wishl-${esc(cur)}` : 'wish'}">${I.cart}<span>${L.buy.btn}</span></a>` : ''}`);
+  const all = [...wish].map((id) => cardsById.get(id)).filter(Boolean);
+  if (!all.length) {
+    view.innerHTML = `<div class="empty"><strong>${L.emptyWish}</strong>${L.emptyWishHint}</div>`;
+    return;
+  }
+  const list = sortCards(sub ? wlCards(sub).map((id) => cardsById.get(id)).filter(Boolean) : all, 'price-desc');
+  const missing = list.filter((c) => !qty(c.id));
+  const cost = missing.reduce((a, c) => a + (price(c.id) ?? 0), 0);
+  view.innerHTML = `<div class="stack">
+    <div class="chips wl-tabs"><button class="chip" data-wl="" aria-pressed="${!sub}">${L.all} · ${all.length}</button>${user.wlists.map((l) => `<button class="chip" data-wl="${esc(l.k)}" aria-pressed="${cur === l.k}">${esc(l.name)} · ${wlCards(l).length}</button>`).join('')}<button class="chip wl-add" data-wl-new="">+ ${L.wl.new}</button></div>
+    ${sub ? `<div class="wl-head"><b>${esc(sub.name)}</b><button class="link-btn" data-wl-rename="${esc(sub.k)}">${L.wl.rename}</button><button class="link-btn danger" data-wl-del="${esc(sub.k)}">${L.wl.del}</button></div>` : ''}
+    <div class="hero-value"><small>${sub ? L.wl.budget(sub.name) : L.wishBudget}</small><strong class="num">${eur(cost)}</strong>
+    <span class="note">${L.wishNote(missing.length, list.length)}</span></div>
+    ${list.length ? `${wishAlertsPanel(list)}<div class="rows">${list.map((c) => cardRow(c)).join('')}</div>` : `<div class="empty"><strong>${L.wl.empty}</strong>${L.wl.emptyHint}</div>`}
+    ${!sub && !user.wlists.length ? `<p class="note">${L.wl.intro}</p>` : ''}
+  </div>`;
+  alertsAck();
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-wl],[data-wl-new],[data-wl-toggle],[data-wl-rename],[data-wl-del]');
+  if (!t) return;
+  const d = t.dataset;
+  if (d.wl !== undefined) { user.prefs.wl = d.wl; save(); renderWishlist(); }
+  else if (d.wlNew !== undefined) {
+    const name = prompt(L.wl.namePrompt, '');
+    const l = wlNew(name, d.wlNew || null);
+    if (!l) return;
+    toast(L.wl.created(l.name));
+    if (d.wlNew) { if (!wish.has(d.wlNew)) { wish.add(d.wlNew); save(); refreshCard(d.wlNew); } if (openId) openCard(openId, true); }
+    else { user.prefs.wl = l.k; save(); renderWishlist(); }
+  } else if (d.wlToggle) {
+    wlToggle(d.wlToggle, d.id);
+    t.setAttribute('aria-pressed', wlById(d.wlToggle)?.ids.includes(d.id) ?? false);
+    if (currentRender === renderWishlist && sheet.hidden) renderWishlist();
+  } else if (d.wlRename) {
+    const l = wlById(d.wlRename); if (!l) return;
+    const name = String(prompt(L.wl.namePrompt, l.name) ?? '').trim().slice(0, 40);
+    if (name) { l.name = name; gSave(); renderWishlist(); }
+  } else if (d.wlDel) {
+    const l = wlById(d.wlDel); if (!l) return;
+    if (!confirm(L.wl.delConfirm(l.name))) return;
+    user.wlists = user.wlists.filter((x) => x.k !== l.k); user.prefs.wl = ''; save(); gSave(); renderWishlist(); toast(L.wl.deleted);
+  }
+});
+
+let searchQuery = '';
+function renderSearch() {
+  setTopbar(`<h1>${L.search}</h1><button class="chip scan-chip" data-action="scan">${I.camera}<span>${L.scan.btn}</span></button>`);
+  const q = searchQuery.trim().toLowerCase();
+  const res = q.length < 2 ? [] : allItems().filter(inCardLang).filter((c) => [c.name, c.nameEn, c.nameJa, `${itemCode(c)} ${c.number ?? ''}`, `${c.set} ${c.number ?? ''}`].some((x) => String(x ?? '').toLowerCase().includes(q)));
+  view.innerHTML = `<div class="stack">
+    <input class="search" id="cardSearch" type="search" placeholder="${L.searchPh}" value="${esc(searchQuery)}" autocomplete="off">
+    <div id="searchResults">${q.length < 2 ? `<p class="note">${L.searchHint(catalog.cards.length, catalog.sets.length)}</p>`
+      : res.length ? `<p class="note">${L.results(res.length)}</p><div class="rows">${sortCards(res, 'price-desc').slice(0, 150).map((c) => cardRow(c)).join('')}</div>`
+      : `<div class="empty"><strong>${L.noResult}</strong></div>`}</div>
+  </div>`;
+}
+
+function portfolioSeries() {
+  const owned = allItems().filter((c) => qtyAll(c.id) > 0 && P(c.id)?.history?.length);
+  if (!owned.length) return [];
+  // la courbe commence quand toutes les cartes possédées ont un prix (sinon faux saut depuis 0 €)
+  const start = owned.reduce((m, c) => (P(c.id).history[0][0] > m ? P(c.id).history[0][0] : m), '');
+  const days = new Set();
+  for (const c of owned) for (const [d] of P(c.id).history) if (d >= start) days.add(d);
+  return [...days].sort().map((d) => [d, Math.round(owned.reduce((a, c) => a + qtyAll(c.id) * (valueAt(P(c.id).history, d) ?? 0), 0) * 100) / 100]);
+}
+// variation d'un prix en euros sur une période (par exemplaire)
+function changeEur(id, days) {
+  const h = P(id)?.history;
+  if (!h || h.length < 2) return null;
+  const last = h[h.length - 1];
+  const from = new Date(parseDay(last[0]) - days * 864e5).toISOString().slice(0, 10);
+  const before = valueAt(h, from) ?? h[0][1];
+  return before != null ? last[1] - before : null;
+}
+const eurSigned = (v) => `${v >= 0 ? '+' : '−'}${eur(Math.abs(v))}`;
+const MX_DEF = { scope: 'market', sort: 'price-desc', days: 7, kind: 'cards', n: 10 };
+const mx = () => ({ ...MX_DEF, ...(user.prefs.mx ?? {}) });
+// explorateur de la page Cotes : portée, tri, période, type, nombre de lignes
+function mxList() {
+  const o = mx();
+  let pool = o.scope === 'mine' ? allItems().filter((c) => qtyAll(c.id) > 0) : o.scope === 'wish' ? [...wish].map((id) => cardsById.get(id)).filter(Boolean) : allItems().filter(inCardLang);
+  if (o.kind === 'cards') pool = pool.filter((c) => !isSealed(c)); else if (o.kind === 'sealed') pool = pool.filter(isSealed);
+  const mult = (c) => (o.scope === 'mine' ? qtyAll(c.id) : 1);
+  const rows = pool.filter((c) => price(c.id) != null).map((c) => ({ c, p: price(c.id), pc: change(c.id, o.days), e: (changeEur(c.id, o.days) ?? 0) * mult(c), v: valueAll(c.id) }));
+  const sorters = {
+    'price-desc': [(r) => true, (a, b) => b.p - a.p], 'price-asc': [(r) => r.p >= 0.02, (a, b) => a.p - b.p],
+    up: [(r) => r.pc > 0 && r.p >= 0.5, (a, b) => b.pc - a.pc], down: [(r) => r.pc < 0 && r.p >= 0.5, (a, b) => a.pc - b.pc],
+    gain: [(r) => r.e > 0, (a, b) => b.e - a.e], loss: [(r) => r.e < 0, (a, b) => a.e - b.e],
+    owned: [(r) => r.v > 0, (a, b) => b.v - a.v],
+  };
+  const [keep, cmp] = sorters[o.sort] ?? sorters['price-desc'];
+  return rows.filter(keep).sort(cmp).slice(0, o.n);
+}
+function renderValues() {
+  setTopbar(`<h1>${L.market}</h1>${langBtn()}`);
+  const owned = allItems().filter((c) => qtyAll(c.id) > 0);
+  ensureHistory(owned.map((c) => c.set), () => { if (currentRender === renderValues && sheet.hidden) renderValues(); });
+  const value = owned.reduce((a, c) => a + valueAll(c.id), 0);
+  const updated = priceFile.updatedAt ? fmt.date.format(parseDay(priceFile.updatedAt)) : '—';
+  const empty = `<p class="note" style="padding:12px">${L.noHistory}</p>`;
+  const o = mx();
+  if (o.scope !== 'mine' && (o.sort === 'owned')) o.sort = 'price-desc';
+  // ma collection : variation totale et plus fortes hausses / baisses en euros
+  const mine = owned.map((c) => ({ c, e: (changeEur(c.id, o.days) ?? 0) * qtyAll(c.id), pc: change(c.id, o.days) })).filter((r) => r.e !== 0);
+  const myUps = mine.filter((r) => r.e > 0).sort((a, b) => b.e - a.e).slice(0, 5);
+  const myDowns = mine.filter((r) => r.e < 0).sort((a, b) => a.e - b.e).slice(0, 5);
+  const myDelta = mine.reduce((a, r) => a + r.e, 0);
+  const gainTag = (e) => `<small class="${e >= 0 ? 'up' : 'down'}">${eurSigned(e)}</small>`;
+  const list = mxList();
+  const chips = (key, opts) => opts.map(([k, l]) => `<button class="chip" data-mx="${key}" data-v="${k}" aria-pressed="${String(o[key]) === String(k)}">${l}</button>`).join('');
+  const sorts = [['price-desc', L.mx.priciest], ['up', L.mx.up], ['down', L.mx.down], ['gain', L.mx.gain], ['loss', L.mx.loss], ['price-asc', L.mx.cheapest], ...(o.scope === 'mine' ? [['owned', L.mx.owned]] : [])];
+  view.innerHTML = `<div class="stack">
+    <section class="panel">
+      <div class="hero-value"><small>${L.colValue}</small><strong class="num">${eur(value)}</strong></div>
+      <p class="note lang-scope">${L.valuesAll}</p>
+      ${owned.length ? '<div class="ranges" id="pfRanges"></div><div class="chart" id="pfChart"></div>' : `<p class="note">${L.colValueHint}</p>`}
+      <p class="note">${hasPrices() ? L.pricesNote(updated) : L.noPricesNote}</p>
+    </section>
+    ${owned.length ? `<section class="panel my-movers">
+      <h3>${L.mx.mineTitle}<small class="num ${myDelta >= 0 ? 'up' : 'down'}">${eurSigned(myDelta)} ${L.mx.over(o.days)}</small></h3>
+      <div class="chips">${chips('days', [[7, L.mx.d7], [30, L.mx.d30], [90, L.mx.d90]])}</div>
+      <h4 class="mv-title up">▲ ${L.mx.myUps}</h4>
+      <div class="rows">${myUps.map((r) => cardRow(r.c, o.days, gainTag(r.e))).join('') || empty}</div>
+      <h4 class="mv-title down">▼ ${L.mx.myDowns}</h4>
+      <div class="rows">${myDowns.map((r) => cardRow(r.c, o.days, gainTag(r.e))).join('') || empty}</div>
+    </section>` : ''}
+    <section class="panel explorer">
+      <h3>${L.mx.title}</h3>
+      <div class="mx-row"><span>${L.mx.scope}</span><div class="chips">${chips('scope', [['market', L.mx.market], ['mine', L.mx.mine], ['wish', L.mx.wish]])}</div></div>
+      <div class="mx-row"><span>${L.mx.sortBy}</span><div class="chips wrap">${chips('sort', sorts)}</div></div>
+      ${['up', 'down', 'gain', 'loss'].includes(o.sort) ? `<div class="mx-row"><span>${L.mx.period}</span><div class="chips">${chips('days', [[7, L.mx.d7], [30, L.mx.d30], [90, L.mx.d90]])}</div></div>` : ''}
+      <div class="mx-row"><span>${L.mx.kind}</span><div class="chips">${chips('kind', [['all', L.all], ['cards', L.mx.cards], ['sealed', L.sealed]])}</div></div>
+      <div class="mx-row"><span>${L.mx.count}</span><div class="chips">${chips('n', [[10, '10'], [25, '25'], [50, '50']])}</div></div>
+      <p class="note lang-scope">${o.scope === 'market' ? L.valuesLists(cardLang) : o.scope === 'mine' ? L.mx.mineNote : L.mx.wishNote}</p>
+    </section>
+    <div class="rows">${list.map((r) => cardRow(r.c, o.days, ['gain', 'loss'].includes(o.sort) ? gainTag(r.e) : o.sort === 'owned' ? `<small>${L.mx.ownedVal(eur(r.v))}</small>` : '')).join('') || empty}</div>
+  </div>`;
+  if (owned.length) mountRangedChart(document.getElementById('pfRanges'), document.getElementById('pfChart'), portfolioSeries(), 'valueRange', true);
+}
+
+
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-mx]');
+  if (!b) return;
+  const k = b.dataset.mx, v = b.dataset.v;
+  user.prefs.mx = { ...mx(), [k]: ['days', 'n'].includes(k) ? Number(v) : v };
+  save();
+  const y = scrollY; renderValues(); scrollTo(0, y);
+});
+
+// ---------- Graphique de prix ----------
+const RANGE_DAYS = [7, 30, 90, 365, 0];
+function mountRangedChart(rangesEl, chartEl, series, prefKey, hasData) {
+  const draw = () => {
+    const days = user.prefs[prefKey] ?? 90;
+    rangesEl.innerHTML = RANGE_DAYS.map((d, i) => `<button type="button" data-days="${d}" aria-pressed="${days === d}">${L.ranges[i]}</button>`).join('');
+    let pts = series;
+    if (days && series.length) {
+      const last = parseDay(series[series.length - 1][0]);
+      const from = new Date(last - days * 864e5).toISOString().slice(0, 10);
+      pts = series.filter(([d]) => d >= from);
+      if (pts.length < 2) pts = series.slice(-2);
+    }
+    drawChart(chartEl, pts, hasData);
+  };
+  rangesEl.onclick = (e) => {
+    const b = e.target.closest('[data-days]');
+    if (!b) return;
+    user.prefs[prefKey] = Number(b.dataset.days); save(); draw();
+  };
+  draw();
+}
+
+function niceTicks(min, max, count = 4) {
+  if (min === max) { const d = Math.abs(min) * 0.1 || 1; min -= d; max += d; }
+  const raw = (max - min) / count;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
+  const lo = Math.floor(min / step) * step;
+  const hi = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let v = lo; v <= hi + step / 2; v += step) ticks.push(Math.round(v * 100) / 100);
+  return ticks;
+}
+let chartSeq = 0;
+function drawChart(el, pts, hasData) {
+  if (!pts || pts.length < 2) {
+    el.innerHTML = `<div class="chart-empty">${hasData ? L.chartWait : L.chartNone}</div>`;
+    return;
+  }
+  const W = Math.max(260, el.clientWidth || 320), H = el.clientHeight || 210;
+  const padL = 58, padR = 12, padT = 14, padB = 26;
+  const xs = pts.map(([d]) => +parseDay(d));
+  const ys = pts.map(([, v]) => v);
+  const t0 = xs[0], t1 = xs[xs.length - 1];
+  const ticks = niceTicks(Math.min(...ys), Math.max(...ys));
+  const y0 = ticks[0], y1 = ticks[ticks.length - 1];
+  const X = (t) => padL + ((t - t0) / (t1 - t0 || 1)) * (W - padL - padR);
+  const Y = (v) => padT + (1 - (v - y0) / (y1 - y0 || 1)) * (H - padT - padB);
+  const line = pts.map((_, i) => `${i ? 'L' : 'M'}${X(xs[i]).toFixed(1)},${Y(ys[i]).toFixed(1)}`).join('');
+  const area = `${line}L${X(t1).toFixed(1)},${Y(y0).toFixed(1)}L${X(t0).toFixed(1)},${Y(y0).toFixed(1)}Z`;
+  const gid = `ga${++chartSeq}`;
+  const xLabels = [0, Math.floor((pts.length - 1) / 2), pts.length - 1].filter((v, i, a) => a.indexOf(v) === i);
+  const tickFmt = new Intl.NumberFormat(fmt.loc, { style: 'currency', currency: 'EUR', maximumFractionDigits: y1 - y0 < 5 ? 2 : 0 });
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(L.chartAria(fmt.date.format(t0), fmt.date.format(t1), eur(ys[0]), eur(ys[ys.length - 1])))}">
+    <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".32"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+    <g class="grid">${ticks.map((t) => `<line x1="${padL}" x2="${W - padR}" y1="${Y(t)}" y2="${Y(t)}"/>`).join('')}</g>
+    <g class="axis">${ticks.map((t) => `<text x="${padL - 8}" y="${Y(t) + 4}" text-anchor="end">${tickFmt.format(t)}</text>`).join('')}
+      ${xLabels.map((i, k, a) => `<text x="${X(xs[i])}" y="${H - 6}" text-anchor="${k === 0 ? 'start' : k === a.length - 1 ? 'end' : 'middle'}">${fmt.day.format(xs[i])}</text>`).join('')}</g>
+    <path d="${area}" fill="url(#${gid})"/>
+    <path class="line" d="${line}"/>
+    ${pts.length <= 12 ? pts.map((_, i) => `<circle class="pt" cx="${X(xs[i])}" cy="${Y(ys[i])}" r="3.5"/>`).join('') : ''}
+    <circle class="end" cx="${X(t1)}" cy="${Y(ys[ys.length - 1])}" r="5"/>
+    <g class="hover" visibility="hidden"><line class="cross" y1="${padT}" y2="${H - padB}"/><circle class="dot" r="5"/></g>
+  </svg><div class="tip num" hidden></div>`;
+  const svg = el.querySelector('svg');
+  const hover = svg.querySelector('.hover');
+  const cross = hover.querySelector('line');
+  const dot = hover.querySelector('circle');
+  const tip = el.querySelector('.tip');
+  const move = (e) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((e.clientX - r.left) / r.width) * W;
+    let best = 0;
+    for (let i = 1; i < xs.length; i++) if (Math.abs(X(xs[i]) - px) < Math.abs(X(xs[best]) - px)) best = i;
+    const cx = X(xs[best]), cy = Y(ys[best]);
+    hover.setAttribute('visibility', 'visible');
+    cross.setAttribute('x1', cx); cross.setAttribute('x2', cx);
+    dot.setAttribute('cx', cx); dot.setAttribute('cy', cy);
+    tip.hidden = false;
+    tip.innerHTML = `<b>${eur(ys[best])}</b>${fmt.date.format(xs[best])}`;
+    const left = (cx / W) * r.width;
+    const half = tip.offsetWidth / 2;
+    tip.style.left = `${Math.min(r.width - half, Math.max(half, left))}px`;
+    tip.style.top = `${Math.max(0, (cy / H) * r.height - 52)}px`;
+  };
+  svg.addEventListener('pointermove', move);
+  svg.addEventListener('pointerdown', move);
+  svg.addEventListener('pointerleave', () => { hover.setAttribute('visibility', 'hidden'); tip.hidden = true; });
+}
+
+// ---------- Fiche carte ----------
+const sheet = document.getElementById('sheet');
+// haut des panneaux : poignée (téléphone), boutons précédent / suivant (PC) et fermer
+const sheetTop = (nav) => `<div class="grab"></div><div class="sheet-tools">${nav ? `<button class="icon-btn nav-btn" data-action="prev" aria-label="${L.prev}">${I.back}</button><button class="icon-btn nav-btn flip" data-action="next" aria-label="${L.next}">${I.back}</button>` : ''}<button class="icon-btn" data-close aria-label="${L.close}">${I.x}</button></div>`;
+let navList = [];
+function navStep(dir) {
+  const i = navList.indexOf(openId);
+  const next = navList[i + dir];
+  if (i >= 0 && next) openCard(next, true);
+}
+const sheetPanel = document.getElementById('sheetPanel');
+// icônes de trigger (âme, pioche, choix, porte…) : simples symboles texte
+const TRIG_ICON = { soul: '✦', draw: '📖', shot: '⚡', return: '🌀', door: '🚪', pool: '💰', gold: '🏅', gate: '⛩', choice: '❓', standby: '⏳', book: '📕' };
+const trigIcon = (t) => `<span class="trig" title="${esc(t)}">${TRIG_ICON[t] ?? esc(t)}</span>`;
+// version de l'autre édition (EN ↔ JP) : bascule l'édition puis ouvre la carte
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-twin]');
+  if (!b) return;
+  const t = cardsById.get(b.dataset.twin);
+  if (!t) return;
+  const l = t.languages?.[0];
+  if (l && l !== cardLang) setCardLang(l);
+  // depuis une série : on passe à la même série dans l'autre édition, puis on ouvre la carte
+  if (location.hash.startsWith('#set-') && location.hash !== `#set-${t.set}`) {
+    addEventListener('hashchange', () => setTimeout(() => openCard(t.id), 0), { once: true });
+    location.hash = `#set-${t.set}`;
+  } else openCard(t.id);
+});
+let openId = null;
+let lastFocus = null;
+
+function openCard(id, keepNav) {
+  const c = cardsById.get(id);
+  if (!c) return;
+  ensureHistory([c.set], () => { if (openId === id) openCard(id, true); });
+  if (!keepNav) navList = [...new Set([...view.querySelectorAll('[data-open]')].map((e) => e.dataset.open))];
+  if (!openId) lastFocus = document.activeElement;
+  openId = id;
+  const s = setOf(c.set);
+  const p = P(id) ?? {};
+  const ch = change(id, 30);
+  const cm = cmUrl(c);
+  const q = qty(id);
+  const stats = [c.level != null ? `${L.level} ${c.level}` : '', c.cost != null ? `${L.cost} ${c.cost}` : '', c.power != null ? `${L.power} ${c.power}` : '', c.soul ? `${L.soul} ${c.soul}` : '', c.trig?.length ? `${L.trigger} ${c.trig.map(trigIcon).join(' ')}` : ''].filter(Boolean).join(' · ');
+  const twin = !isSealed(c) && !isExtra(c) ? cardsById.get(twinId(c)) : null;
+    const sealedItem = isSealed(c);
+  sheetPanel.innerHTML = `${sheetTop(navList.length > 1)}
+    <div class="stack detail">
+      <div class="detail-top ${sealedItem ? 'is-sealed' : ''}" ${rarityStyle(c.rarity)}>
+        ${sealedItem ? `<div class="card-img">${cardImg(c, true)}${c.pack ? `<span class="pack-badge num">×${c.pack}</span>` : ''}</div>` : `<button class="card-img zoomable" data-zoom ${c.hd ? `data-hd="${esc(c.hd)}"` : ''} aria-label="${L.zoom}">${cardImg(c, true, true)}<span class="zoom-hint">3D</span></button>`}
+        <div class="detail-info">
+          <h2 id="sheetTitle">${esc(cardName(c))}</h2>
+          ${sealedItem
+            ? `<div class="sub">${esc(L.catOne[c.category] ?? '')}${itemCode(c) ? `<br><b class="print">${esc(itemCode(c))}</b>${s ? ` · ${esc(setName(s))}` : ''}` : ''}</div>`
+            : isExtra(c) ? `<div class="sub">${esc(L.ex.cats[c.category] ?? L.ex.cats.other)}<br><span class="num"><b class="print">EXTRA</b> · ${esc(c.number ?? '')}</span></div>`
+            : `<div class="sub">${esc(s ? setName(s) : c.set)}<br><span class="num"><b class="print">${esc(cardCode(c))}</b></span></div>`}
+          ${c.rarity ? `<span class="rarity" ${rarityStyle(c.rarity)}>${esc(rarityLabel(c.rarity))}${c.type ? ` · ${esc(typeLabel(c.type))}` : ''}${c.color ? ` · ${esc(colorLabel(c.color))}` : ''}</span>` : ''}
+          ${stats ? `<span class="sub num">${stats}</span>` : ''}
+          ${c.traits?.length ? `<span class="sub traits">${c.traits.map((t) => `<i>${esc(t)}</i>`).join('')}</span>` : ''}
+          ${twin && twin.id !== c.id ? `<button class="link-btn sub" data-twin="${esc(twin.id)}">${twin.languages?.includes('ja') ? L.jpOf : L.enOf} · ${esc(twin.name)}</button>` : ''}
+          ${!sealedItem ? langsOf(id).filter((l) => okey(id, l) !== okey(id) && qty(id, l)).map((l) => `<span class="sub other-copies">${L.otherCopies(qty(id, l), LANG_TAG[l])}</span>`).join('') : ''}
+          <div class="big-price num"><small>${isExtra(c) ? L.ex.estimate : L.trend}${p.foil ? ` · <span class="foil">${L.foil}</span>` : ''}</small>${p.trend != null ? eur(p.trend) : `<span style="font-size:18px;color:var(--muted)">${L.noPrice}</span>`}</div>
+          ${ch != null ? `<span class="delta num ${ch >= 0 ? 'up' : 'down'}">${pct(ch)} ${L.over30}</span>` : ''}
+          <div class="detail-actions">
+            <div class="stepper" role="group" aria-label="${L.copies}">
+              <button data-qty="-1" aria-label="${L.removeCopy}">−</button>
+              <output class="num" aria-live="polite">${q}</output>
+              <button data-qty="1" aria-label="${L.addCopy}">+</button>
+            </div>
+            <button class="mini-btn heart" style="width:42px;height:42px" data-wish="${esc(id)}" aria-pressed="${wish.has(id)}" aria-label="${L.wishBtn}">${I.heart}</button>
+          </div>
+        </div>
+      </div>
+      ${q > 0 && !sealedItem ? `<section class="panel copies"><h3>${L.cp.title}<small>${p.foil ? L.cp.foilOnly : foilPrice(id) != null ? L.cp.foilPrice(eur(foilPrice(id))) : ''}</small></h3>
+        ${copiesOf(id).slice(0, 12).map((x, i) => `<div class="copy-row"><span class="num">#${i + 1}</span>
+          <select data-copy-cond="${i}" aria-label="${L.cp.cond} #${i + 1}">${CONDS.map((k) => `<option value="${k}" ${x.c === k ? 'selected' : ''}>${esc(L.cp.conds[k])}</option>`).join('')}</select>
+          ${p.foil ? `<span class="foil-tag">Foil</span>` : foilPrice(id) != null ? `<button class="chip" data-copy-foil="${i}" aria-pressed="${!!x.f}">Foil</button>` : ''}</div>`).join('')}
+        ${q > 12 ? `<p class="note" style="margin:0">${L.cp.more(q - 12)}</p>` : ''}
+      </section>` : ''}
+      ${wish.has(id) ? wlChips(id) : ''}
+      ${wish.has(id) && !sealedItem ? alertLine(id) : ''}
+      ${cloud.enabled && qtyAll(id) > 0 && needsProof(id) ? `<div class="verify-line ${cardVerified(id) ? 'ok' : ''}">${I.trophy}<span>${cardVerified(id) ? L.lb.cardOk : L.lb.cardNeeds(VERIFY_MIN())}</span>${cardVerified(id) ? '' : `<button class="chip" data-proof-card="${esc(id)}">${I.camera}<span>${L.lb.verify}</span></button>`}</div>` : ''}
+      ${q > 0 ? `<div class="paid-line">
+        <label for="cardPaid">${L.paidLabel}</label>
+        <input id="cardPaid" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0,00" value="${paidOf(id) ?? ''}" data-paid-id="${esc(id)}">
+        <span class="paid-diff num" id="paidDiff">${paidOf(id) != null ? (p.trend != null ? `${L.paidVs} ${diffHtml(paidDiff(id))}` : L.noPrice) : `<span class="muted">${L.paidHint}</span>`}</span>
+      </div>` : ''}
+      ${p.trend != null && !isExtra(c) ? `<div class="stats">
+        <div class="stat"><small>${L.from}</small><b class="num">${eur(p.low)}</b></div>
+        <div class="stat"><small>${L.avg7}</small><b class="num">${eur(p.avg7)}</b></div>
+        <div class="stat"><small>${L.avg30}</small><b class="num">${eur(p.avg30)}</b></div>
+      </div>` : ''}
+      <section class="panel" ${isExtra(c) ? 'hidden' : ''}>
+        <h3>${L.curve} <small>Cardmarket${priceFile.updatedAt ? ` · ${fmt.date.format(parseDay(priceFile.updatedAt))}` : ''}</small></h3>
+        <div class="ranges" id="cardRanges"></div>
+        <div class="chart" id="cardChart"></div>
+        ${p.seeded && (p.history?.length ?? 0) > 1 ? `<p class="note">${L.seeded}</p>` : ''}
+      </section>
+      ${isExtra(c) ? `${c.origin ? `<p class="note extra-origin">★ ${esc(c.origin[lang] ?? c.origin.en)}</p>` : ''}
+      ${c.price ? `<p class="note num">${L.ex.priceNote(eur(c.price.value), fmt.date.format(parseDay(c.price.date)), c.price.source)}</p>` : ''}
+      <a class="cta" href="https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(`weiss schwarz ${c.ebay ?? c.nameEn ?? c.name}`)}" target="_blank" rel="noopener">${L.ex.ebayLive} ${I.ext}</a>
+      <a class="btn-ghost" style="text-align:center;text-decoration:none" href="https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(`weiss schwarz ${c.ebay ?? c.nameEn ?? c.name}`)}&LH_Sold=1&LH_Complete=1" target="_blank" rel="noopener">${L.ex.ebaySold}</a>`
+      : `<a class="cta" href="${esc(cm.url)}" target="_blank" rel="noopener">${cm.exact ? L.cmView : L.cmSearch} ${I.ext}</a>`}
+      ${sealedItem ? '' : `<button class="btn-ghost" data-action="g-add-card" data-id="${esc(id)}">${I.slab}<span>${L.gr.addThis}${user.graded.some((e) => e.id === id) ? ` · ${L.gr.youHave(user.graded.filter((e) => e.id === id).length)}` : ''}</span></button>`}
+      ${c.official ? `<a class="btn-ghost" style="text-align:center;text-decoration:none" href="${esc(c.official)}" target="_blank" rel="noopener">${L.official}</a>` : ''}
+      ${q > 0 && p.trend ? `<p class="note num" style="text-align:center">${L.worth(q, eur(valueOf(id)))}${paidOf(id) != null ? ` · ${L.boughtFor(eur(q * paidOf(id)))}` : ''}</p>` : ''}
+      ${c.artist ? `<p class="note" style="text-align:center">${esc(L.art(c.artist))}</p>` : ''}
+    </div>`;
+  sheet.hidden = false;
+  document.body.style.overflow = 'hidden';
+  const ni = navList.indexOf(id);
+  for (const [sel, ok] of [['[data-action="prev"]', ni > 0], ['[data-action="next"]', ni >= 0 && ni < navList.length - 1]]) { const b = sheetPanel.querySelector(sel); if (b) b.disabled = !ok; }
+  mountRangedChart(document.getElementById('cardRanges'), document.getElementById('cardChart'), p.history ?? [], 'cardRange', p.trend != null);
+  sheetPanel.querySelector('.stepper button')?.focus({ preventScroll: true });
+  if (!keepNav || isPC()) petEvent('open', c);
+}
+function closeCard() {
+  sheet.hidden = true; openId = null; sheetMode = null; gForm = null; gOpen = null;
+  petEvent('close');
+  document.body.style.overflow = '';
+  lastFocus?.focus?.({ preventScroll: true });
+}
+
+// ---------- Réglages ----------
+function openSettings() {
+  openId = null; sheetMode = null;
+  sheetPanel.innerHTML = `${sheetTop()}<div class="stack">
+    <h2 id="sheetTitle" style="margin:0;font:700 22px var(--font-display)">${L.settings}</h2>
+    ${cloud.enabled ? `<button class="btn-ghost acct-row" data-action="account">${I.person}<span>${cloud.user ? esc(L.signedAs(cloud.user.email ?? cloud.user.name ?? '')) : L.account}</span></button>` : ''}
+    <div class="panel" id="langPanel"><h3>${I.globe}${L.language}</h3>${seg('lang', lang, UI_LANGS)}<p class="note" style="margin:0">${L.langHint}</p></div>
+    <div class="panel"><h3>${L.cardLanguage}</h3>${seg('cardLang', cardLang, [['en', 'EN · English'], ['ja', 'JP · 日本語']])}<p class="note" style="margin:0">${L.cardLangHint}</p></div>
+    <div class="panel"><h3>${L.petSetting}</h3>${seg('pet', user.prefs.pet === 'off' ? 'off' : 'on', [['on', L.yes], ['off', L.no]])}<p class="note" style="margin:0">${L.petHint}</p></div>
+    <p class="note">${L.storage(Object.keys(user.owned).length, wish.size)}</p>
+    <div class="menu">
+      <button class="btn-ghost" data-action="export">${L.export}</button>
+      <label class="btn-ghost" for="importFile">${L.import}</label>
+      <input id="importFile" type="file" accept="application/json,.json" hidden>
+      <textarea id="exportBox" class="search" rows="4" hidden readonly></textarea>
+    </div>
+    <p class="note">${L.dataLine(catalog.cards.length, catalog.sets.length, priceFile.updatedAt ? fmt.date.format(parseDay(priceFile.updatedAt)) : '—')}</p>
+    ${canInstall() ? `<div class="panel"><h3>${L.inst.title}</h3><p class="note" style="margin:0">${installHow()}</p>${installEvt ? `<button class="cta" data-action="install">${L.inst.btn}</button>` : ''}</div>` : ''}
+    ${supportUrl() ? `<div class="support-row">${supportLink()}<span class="note">${L.supportHint}</span></div>` : ''}
+    <p class="note">${L.disclaimer}</p>
+    <button class="btn-ghost" data-action="close">${L.close}</button>
+  </div>`;
+  sheet.hidden = false;
+  document.body.style.overflow = 'hidden';
+  petEvent('sheet');
+}
+
+// ---------- Compte (Firebase) : collection synchronisée entre appareils ----------
+// Activé seulement si data/firebase.json contient la configuration du projet Firebase (voir README).
+// La collection reste enregistrée sur le téléphone (utilisable hors ligne) et la copie du compte est tenue à jour.
+const FIREBASE = 'https://www.gstatic.com/firebasejs/12.19.0';
+const cloud = { enabled: false, user: null, status: 'off', lastSync: null, dirty: false, timer: null, api: null, unsub: null, error: '', busy: false, confirmDelete: false };
+let sheetMode = null; // 'account' quand le panneau du compte est ouvert
+
+async function initCloud() {
+  let cfg = null;
+  try { const r = await fetch('data/firebase.json', { cache: 'no-cache' }); if (r.ok) cfg = await r.json(); } catch { /* pas de compte */ }
+  if (!cfg?.apiKey) return;
+  try {
+    const [appM, authM, fsM] = await Promise.all(['app', 'auth', 'firestore'].map((m) => import(`${FIREBASE}/firebase-${m}.js`)));
+    const app = appM.initializeApp(cfg);
+    const auth = authM.getAuth(app);
+    auth.languageCode = lang;
+    cloud.api = { app, authM, fsM, auth, db: fsM.getFirestore(app) };
+    cloud.cfg = cfg;
+    cloud.enabled = true;
+    authM.getRedirectResult(auth).catch((e) => { cloud.error = e.code; refreshAccount(); });
+    authM.onAuthStateChanged(auth, onCloudUser);
+    refreshAccount();
+  } catch (e) { console.warn('Compte indisponible', e); }
+}
+
+const cloudRef = () => cloud.api.fsM.doc(cloud.api.db, COL.users, cloud.user.uid);
+const canon = (d) => JSON.stringify([Object.entries(d?.owned ?? {}).filter(([, q]) => q > 0).sort(), [...(d?.wish ?? [])].sort(), [...(d?.fav ?? [])].sort()]);
+function cloudData() { return { owned: Object.fromEntries(Object.entries(user.owned).filter(([, q]) => q > 0)), wish: [...wish], fav: [...fav] }; }
+// fusion au premier passage d'un appareil sur un compte : on additionne (quantité max, souhaits et favoris réunis)
+function unionData(a, b) {
+  const owned = { ...(a?.owned ?? {}) };
+  for (const [id, q] of Object.entries(b?.owned ?? {})) owned[id] = Math.max(owned[id] ?? 0, q);
+  return { owned, wish: [...new Set([...(a?.wish ?? []), ...(b?.wish ?? [])])], fav: [...new Set([...(a?.fav ?? []), ...(b?.fav ?? [])])] };
+}
+function applyCloudData(d) {
+  user.owned = migrateOwned({ ...(d.owned ?? {}) });
+  wish.clear(); (d.wish ?? []).forEach((x) => wish.add(x));
+  fav.clear(); (d.fav ?? []).forEach((x) => fav.add(x));
+  user.wish = [...wish]; user.fav = [...fav];
+  lastSig = collectionSig();
+  try { localStorage.setItem(KEY, JSON.stringify(user)); } catch { /* stockage indisponible */ }
+  if (sheet.hidden) currentRender();
+  else if (openId) { currentRender(); openCard(openId); }
+  else { currentRender(); refreshAccount(); }
+}
+async function pushCloud() {
+  if (!cloud.user) return;
+  clearTimeout(cloud.timer);
+  cloud.status = 'syncing'; refreshAccount();
+  try {
+    await cloud.api.fsM.setDoc(cloudRef(), { ...cloudData(), app: 'WeissDex', v: 1, updatedAt: cloud.api.fsM.serverTimestamp() });
+    cloud.dirty = false; user.pending = false; save();
+    cloud.status = 'ok'; cloud.lastSync = new Date(); cloud.error = '';
+  } catch (e) { cloud.status = 'error'; cloud.error = e.code ?? ''; }
+  refreshAccount();
+}
+function cloudChanged() {
+  if (!cloud.enabled) return;
+  user.pending = true;
+  if (!cloud.user) return;
+  cloud.dirty = true;
+  clearTimeout(cloud.timer);
+  cloud.timer = setTimeout(pushCloud, 1200);
+}
+function onCloudUser(u) {
+  cloud.unsub?.(); cloud.unsub = null;
+  cloud.user = u ? { uid: u.uid, email: u.email, name: u.displayName } : null;
+  cloud.confirmDelete = false;
+  cloud.supporter = false; cloud.avatar = null; cloud.banner = null;
+  gOnUser(u); dOnUser(u);
+  if (!u) { cloud.status = 'off'; friendsStop(); renderChromeBadges(); refreshAccount(); if (currentRender === renderFriends || currentRender === renderFriendCurrent) currentRender(); return; }
+  cloud.status = 'syncing'; refreshAccount();
+  const { fsM } = cloud.api;
+  loadProfile(u.uid);
+  friendsInit(u.uid);
+  let first = true;
+  cloud.unsub = fsM.onSnapshot(cloudRef(), async (snap) => {
+    if (snap.metadata.hasPendingWrites) return;
+    const remote = snap.exists() ? snap.data() : null;
+    if (first) {
+      first = false;
+      const firstTimeHere = user.syncedUid !== u.uid;
+      let next;
+      if (!remote) next = cloudData();                          // compte neuf : on envoie la collection du téléphone
+      else if (firstTimeHere) next = unionData(remote, cloudData()); // nouvel appareil : on réunit les deux
+      else if (user.pending) next = cloudData();               // changements faits hors ligne : le téléphone est à jour
+      else next = remote;                                       // sinon le compte fait foi
+      user.syncedUid = u.uid;
+      applyCloudData(next);
+      if (!remote || canon(next) !== canon(remote)) await pushCloud();
+      else { user.pending = false; save(); cloud.status = 'ok'; cloud.lastSync = new Date(); refreshAccount(); }
+      return;
+    }
+    if (cloud.dirty || !remote) return;                        // nos propres changements partent juste après
+    applyCloudData(remote);                                     // changement fait sur un autre appareil
+    cloud.status = 'ok'; cloud.lastSync = new Date(); refreshAccount();
+  }, (e) => { cloud.status = 'error'; cloud.error = e.code ?? ''; refreshAccount(); });
+}
+
+const accountBtn = () => (cloud.enabled ? `<button class="icon-btn acct-btn ${cloud.user ? `signed on-${cloud.status}` : ''} ${cloud.supporter ? 'is-supporter' : ''}" data-action="account" aria-label="${L.account}">${cloud.user && cloud.avatar ? `<img class="acct-avatar" src="${esc(cloud.avatar)}" alt="">` : I.person}</button>` : '');
+
+// ---------- Soutien : statut (activé par le propriétaire dans la console Firebase) et photo de profil ----------
+// supporters/<uid> { active: true } : lisible par le compte, modifiable seulement depuis la console (règles Firestore).
+// profiles/<uid> { avatar } : petite image (160 px) réservée aux soutiens actifs.
+const supportUrl = () => config.support?.url || '';
+// Administrateurs : liste dans data/config.json (affichage du panneau) ; la vraie protection est dans firestore.rules
+const isAdmin = () => !!cloud.user && (config.admins ?? []).includes(cloud.user.uid);
+const admin = { list: null, busy: false, msg: '' };
+async function adminLoad() {
+  try {
+    const snap = await fsx().getDocs(cref('supporters'));
+    admin.list = await Promise.all(snap.docs.filter((d) => d.data().active === true).map(async (d) => ({ uid: d.id, pseudo: (await friendName(d.id)).pseudo })));
+  } catch (e) { admin.list = []; admin.msg = e?.code === 'permission-denied' ? L.adm.denied : L.fr.error; }
+  if (sheetMode === 'account' && !sheet.hidden) openAccount(true);
+}
+async function adminSet(uid, on) {
+  uid = String(uid ?? '').trim();
+  if (!/^[A-Za-z0-9]{20,40}$/.test(uid)) { admin.msg = L.adm.badId; openAccount(true); return; }
+  admin.busy = true; admin.msg = ''; openAccount(true);
+  try {
+    if (on) await fsx().setDoc(dref('supporters', uid), { active: true, since: fsx().serverTimestamp() });
+    else await fsx().deleteDoc(dref('supporters', uid));
+    toast(on ? L.adm.on : L.adm.off);
+    if (uid === cloud.user.uid) { cloud.supporter = on; refreshAccount(); }
+  } catch (e) { admin.msg = e?.code === 'permission-denied' ? L.adm.denied : L.fr.error; }
+  admin.busy = false;
+  await adminLoad();
+}
+function adminPanel() {
+  if (!isAdmin()) return '';
+  if (admin.list === null) { admin.list = []; adminLoad(); }
+  return `<div class="panel admin-panel">
+    <h3>${L.adm.title}<small>${L.adm.role}</small></h3>
+    <form class="inline-form" id="adminForm"><input class="search" id="adminId" autocomplete="off" placeholder="${L.adm.idPh}"><button class="cta" ${admin.busy ? 'disabled' : ''}>${L.adm.activate}</button></form>
+    ${admin.msg ? `<p class="form-err">${esc(admin.msg)}</p>` : ''}
+    <span class="note">${L.adm.listTitle} (${admin.list.length})</span>
+    <span class="note">${L.mod.adminTitle}</span>
+    <form class="inline-form" id="adminLbForm"><input class="search" id="adminLbId" autocomplete="off" placeholder="${L.adm.idPh}"><button class="btn-ghost">${L.lb.adminRemove}</button></form>
+    <form class="inline-form" id="adminModForm"><input class="search" id="adminModId" autocomplete="off" placeholder="${L.adm.idPh}"><button class="btn-ghost">${L.mod.adminRemove}</button></form>
+    ${admin.list.map((a) => `<div class="id-row"><b>${a.pseudo !== '?' ? '@' + esc(a.pseudo) : '—'}</b><code>${esc(a.uid)}</code><button class="chip" data-admin-off="${esc(a.uid)}">${L.adm.remove}</button></div>`).join('') || `<span class="note">${L.adm.none}</span>`}
+  </div>`;
+}
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'adminLbForm') return;
+  e.preventDefault();
+  const uid = document.getElementById('adminLbId').value.trim();
+  if (!/^[A-Za-z0-9]{20,40}$/.test(uid)) { toast(L.adm.badId); return; }
+  try {
+    await fsx().deleteDoc(dref(COL.leaderboard, uid));
+    for (const sub of ['sets', 'cards']) {
+      const ps = await fsx().getDocs(cref(COL.proofs, uid, sub)).catch(() => null);
+      for (const d of ps?.docs ?? []) await fsx().deleteDoc(d.ref).catch(() => {});
+    }
+    toast(L.lb.adminDone);
+  } catch (er) { toast(er?.code === 'permission-denied' ? L.adm.denied : L.fr.error); }
+});
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'adminModForm') return;
+  e.preventDefault();
+  const uid = document.getElementById('adminModId').value.trim();
+  if (!/^[A-Za-z0-9]{20,40}$/.test(uid)) { toast(L.adm.badId); return; }
+  try { await fsx().deleteDoc(dref('profiles', uid)); toast(L.mod.adminDone); } catch (er) { toast(er?.code === 'permission-denied' ? L.adm.denied : L.fr.error); }
+});
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'adminForm') return;
+  e.preventDefault();
+  adminSet(document.getElementById('adminId').value, true);
+});
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-admin-off]');
+  if (b) adminSet(b.dataset.adminOff, false);
+});
+async function loadProfile(uid) {
+  const { fsM, db } = cloud.api;
+  try { const s = await fsM.getDoc(fsM.doc(db, 'supporters', uid)); if (cloud.user?.uid === uid) cloud.supporter = s.exists() && s.data().active === true; } catch { /* pas de statut */ }
+  try { const p = await fsM.getDoc(fsM.doc(db, 'profiles', uid)); if (cloud.user?.uid === uid) { cloud.avatar = p.exists() ? p.data().avatar ?? null : null; cloud.banner = p.exists() ? p.data().banner ?? null : null; } } catch { /* pas de photo */ }
+  refreshAccount();
+}
+function resizeAvatar(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const size = 160, c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      const side = Math.min(img.naturalWidth, img.naturalHeight);
+      c.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
+      URL.revokeObjectURL(img.src);
+      let url = c.toDataURL('image/webp', 0.82);
+      if (!url.startsWith('data:image/webp')) url = c.toDataURL('image/jpeg', 0.82);
+      resolve(url);
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+// bannière de profil (comme Discord) : 960 × 320, recadrée au centre
+function resizeBanner(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const W = 960, H = 320, c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const k = Math.max(W / img.naturalWidth, H / img.naturalHeight);
+      const w = W / k, h = H / k;
+      c.getContext('2d').drawImage(img, (img.naturalWidth - w) / 2, (img.naturalHeight - h) / 2, w, h, 0, 0, W, H);
+      URL.revokeObjectURL(img.src);
+      let url = c.toDataURL('image/webp', 0.78);
+      if (!url.startsWith('data:image/webp')) url = c.toDataURL('image/jpeg', 0.78);
+      if (url.length > 190000) url = c.toDataURL('image/jpeg', 0.6);
+      resolve(url);
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+// ---------- Vérification automatique des images de profil (Gemini, même service que Capri) ----------
+// Refuse la nudité, le contenu sexuel, le sang, les blessures, les cadavres, la violence réelle, les symboles haineux et la drogue.
+// En cas de doute ou si la vérification est impossible, l'image n'est pas publiée.
+const MOD_PROMPT = `Tu es le modérateur des images de profil d'une application de collection de cartes, utilisée aussi par des adolescents.
+Analyse l'image et réponds UNIQUEMENT en JSON : {"ok": true ou false, "category": "none" | "sexual" | "nudity" | "gore" | "violence" | "hate" | "drugs" | "other", "reason": "raison courte en français"}.
+REFUSE (ok=false) : nudité ou semi-nudité, contenu sexuel ou très suggestif, sang, blessures, mutilation, cadavre ou personne morte, violence réelle ou torture, arme pointée sur une vraie personne, symboles ou gestes haineux, drogue, automutilation, contenu choquant.
+ACCEPTE (ok=true) : selfies et personnes habillées, animaux, paysages, objets, cartes à jouer, logos, illustrations de jeux vidéo ou d'anime (même des personnages armés ou en action) tant qu'il n'y a ni gore, ni nudité, ni sang.
+En cas de doute sur la nudité, le sang ou un cadavre, refuse.`;
+async function moderateImage(dataUrl) {
+  if (!cloud.api?.app) throw Object.assign(new Error('mod'), { userMsg: L.mod.unavailable });
+  if (!capri.aiM) { capri.aiM = await import(`${FIREBASE}/firebase-ai.js`); capri.ai = capri.aiM.getAI(cloud.api.app, { backend: new capri.aiM.GoogleAIBackend() }); }
+  const [, mime, data] = /^data:([^;]+);base64,(.*)$/.exec(dataUrl) ?? [];
+  const models = cloud.cfg?.capriModels?.length ? cloud.cfg.capriModels : CAPRI_MODELS_DEFAULT;
+  for (const name of models) {
+    let res;
+    try {
+      const model = capri.aiM.getGenerativeModel(capri.ai, { model: name, generationConfig: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 300 } });
+      res = await model.generateContent([{ text: MOD_PROMPT }, { inlineData: { mimeType: mime, data } }]);
+    } catch (e) {
+      if (/SAFETY|blocked|PROHIBITED/i.test(String(e?.message))) throw Object.assign(new Error('mod'), { userMsg: L.mod.rejected(L.mod.cats.other) });
+      continue;   // modèle indisponible : on essaie le suivant
+    }
+    const r = res.response;
+    if (r.promptFeedback?.blockReason || r.candidates?.[0]?.finishReason === 'SAFETY') throw Object.assign(new Error('mod'), { userMsg: L.mod.rejected(L.mod.cats.other) });
+    let out;
+    try { out = JSON.parse(r.text()); } catch { continue; }
+    if (out?.ok === true && (!out.category || out.category === 'none')) return true;
+    throw Object.assign(new Error('mod'), { userMsg: L.mod.rejected(L.mod.cats[out?.category] ?? L.mod.cats.other) });
+  }
+  throw Object.assign(new Error('mod'), { userMsg: L.mod.unavailable });
+}
+async function saveProfileImage(src, kind) {
+  if (!cloud.api || !cloud.user) { toast(L.avatarErr); return; }
+  const { fsM, db } = cloud.api;
+  cloud.modBusy = kind; refreshAccount();
+  try {
+    const url = typeof src === 'string' ? src : kind === 'banner' ? await resizeBanner(src) : await resizeAvatar(src);
+    await moderateImage(url);
+    await fsM.setDoc(fsM.doc(db, 'profiles', cloud.user.uid), { [kind]: url, updatedAt: fsM.serverTimestamp() }, { merge: true });
+    cloud[kind] = url; toast(kind === 'banner' ? L.mod.bannerSaved : L.avatarSaved);
+  } catch (e) { toast(e?.userMsg ?? (e?.code === 'permission-denied' ? L.avatarDenied : L.avatarErr)); }
+  cloud.modBusy = null; refreshAccount();
+}
+const saveAvatar = (file) => saveProfileImage(file, 'avatar');
+async function removeProfileImage(kind) {
+  const { fsM, db } = cloud.api;
+  try { await fsM.setDoc(fsM.doc(db, 'profiles', cloud.user.uid), { [kind]: fsM.deleteField(), updatedAt: fsM.serverTimestamp() }, { merge: true }); cloud[kind] = null; toast(kind === 'banner' ? L.mod.bannerRemoved : L.avatarRemoved); }
+  catch { toast(L.avatarErr); }
+  refreshAccount();
+}
+const supportLink = (cls = 'support-link') => (supportUrl() ? `<a class="${cls}" href="${esc(supportUrl())}" target="_blank" rel="noopener">${I.heartSmall}<span>${L.support}</span></a>` : '');
+function refreshAccount() {
+  if (cloud.enabled) for (const b of document.querySelectorAll('.acct-btn')) b.outerHTML = accountBtn();
+  if (cloud.enabled && !topbar.querySelector('.acct-btn') && topbar.querySelector('[data-action="settings"]')) currentRender();
+  if (sheetMode === 'account' && !sheet.hidden) openAccount(true);
+}
+function authError(code) { return L.authErr[code] ?? L.authErr.default; }
+function openAccount(keep) {
+  openId = null; sheetMode = 'account';
+  petEvent('sheet');
+  const em = keep ? document.getElementById('acctEmail')?.value ?? '' : '';
+  const u = cloud.user;
+  const time = cloud.lastSync ? new Intl.DateTimeFormat(fmt.loc, { hour: '2-digit', minute: '2-digit' }).format(cloud.lastSync) : '';
+  const status = cloud.status === 'ok' ? `<span class="sync ok">● ${L.syncOk(time)}</span>` : cloud.status === 'syncing' ? `<span class="sync wait">● ${L.syncing}</span>` : cloud.status === 'error' ? `<span class="sync err">● ${L.syncErr}</span>` : '';
+  sheetPanel.innerHTML = `${sheetTop()}<div class="stack account">
+    <h2 id="sheetTitle" style="margin:0;font:700 22px var(--font-display)">${L.account}</h2>
+    ${u ? `
+      <div class="panel">
+        <strong>${esc(L.signedAs(u.email ?? u.name ?? ''))}</strong>
+        ${status}
+        <span class="note">${L.syncInfo(Object.values(user.owned).filter((q) => q > 0).length, wish.size)}</span>
+      </div>
+      <div class="panel profile-panel ${cloud.supporter ? 'is-supporter' : ''} ${cloud.banner ? 'has-banner' : ''}">
+        ${cloud.supporter || cloud.banner ? `<div class="profile-banner">${cloud.banner ? `<img src="${esc(cloud.banner)}" alt="">` : `<span>${L.mod.bannerEmpty}</span>`}</div>` : ''}
+        <div class="profile-row">
+          <span class="profile-avatar">${cloud.avatar ? `<img src="${esc(cloud.avatar)}" alt="">` : I.person}</span>
+          <div class="profile-text">
+            <strong>${L.avatar}${cloud.supporter ? ` <span class="supporter-badge">♥ ${L.supporter}</span>` : ''}</strong>
+            <span class="note">${cloud.supporter ? L.supporterThanks : L.avatarLocked}</span>
+          </div>
+        </div>
+        ${cloud.supporter ? `<div class="profile-actions">
+          <label class="btn-ghost" for="avatarFile">${cloud.modBusy === 'avatar' ? L.mod.checking : cloud.avatar ? L.avatarChange : L.avatarAdd}</label>
+          <input id="avatarFile" type="file" accept="image/*" hidden ${cloud.modBusy ? 'disabled' : ''}>
+          ${cloud.avatar ? `<button class="btn-ghost" data-action="avatar-remove">${L.avatarRemove}</button>` : ''}
+        </div>
+        <div class="profile-actions">
+          <label class="btn-ghost" for="bannerFile">${cloud.modBusy === 'banner' ? L.mod.checking : cloud.banner ? L.mod.bannerChange : L.mod.bannerAdd}</label>
+          <input id="bannerFile" type="file" accept="image/*" hidden ${cloud.modBusy ? 'disabled' : ''}>
+          ${cloud.banner ? `<button class="btn-ghost" data-action="banner-remove">${L.avatarRemove}</button>` : ''}
+        </div>
+        <span class="note">${L.mod.policy}</span>` : supportLink('btn-ghost support-btn')}
+        <div class="id-row"><span class="note">${L.myId} :</span><code id="myId">${esc(u.uid)}</code><button class="chip" data-action="copy-id">${L.copy}</button></div>
+        ${cloud.supporter ? '' : `<span class="note">${L.myIdHint}</span>`}
+      </div>
+      ${adminPanel()}
+      <a class="btn-ghost" style="text-align:center;text-decoration:none" href="#friends" data-close>${L.fr.mine}${fr.requests.length ? ` · ${L.fr.requests} (${fr.requests.length})` : ''}</a>
+      <button class="btn-ghost" data-action="signout">${L.signOut}</button>
+      <div class="panel danger-zone">
+        <span class="note">${L.deleteNote}</span>
+        <button class="btn-ghost btn-danger" data-action="delete-account">${cloud.confirmDelete ? L.deleteConfirm : L.deleteAcc}</button>
+      </div>` : `
+      <p class="note">${L.accountPitch}</p>
+      <button class="btn-ghost btn-google" data-action="google" ${cloud.busy ? 'disabled' : ''}><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.6 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h5.9a5 5 0 0 1-2.2 3.3v2.7h3.6c2-1.9 3.3-4.7 3.3-8.1z"/><path fill="#34A853" d="M12 23c3 0 5.5-1 7.3-2.7l-3.6-2.7c-1 .7-2.2 1.1-3.7 1.1-2.9 0-5.3-1.9-6.2-4.5H2.1v2.8A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.8 14.2a6.6 6.6 0 0 1 0-4.3V7.1H2.1a11 11 0 0 0 0 9.9z"/><path fill="#EA4335" d="M12 5.4c1.6 0 3.1.6 4.2 1.6l3.2-3.2A11 11 0 0 0 2.1 7.1l3.7 2.8C6.7 7.3 9.1 5.4 12 5.4z"/></svg>${L.google}</button>
+      <div class="divider"><span>${L.or}</span></div>
+      <form class="stack" id="acctForm" style="gap:10px">
+        <input class="search" id="acctEmail" type="email" autocomplete="email" placeholder="${L.email}" value="${esc(em)}" required>
+        <input class="search" id="acctPass" type="password" autocomplete="current-password" placeholder="${L.password}" minlength="6">
+        <div class="acct-actions">
+          <button class="cta" type="submit" data-mode="in" ${cloud.busy ? 'disabled' : ''}>${L.signIn}</button>
+          <button class="btn-ghost" type="submit" data-mode="up" ${cloud.busy ? 'disabled' : ''}>${L.signUp}</button>
+        </div>
+        <button class="link-btn" type="button" data-action="forgot">${L.forgot}</button>
+      </form>`}
+    ${cloud.error && !u ? `<p class="form-err" role="alert">${esc(authError(cloud.error))}</p>` : ''}
+    <button class="btn-ghost" data-action="close">${L.close}</button>
+  </div>`;
+  sheet.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+async function cloudAction(fn, okMsg) {
+  cloud.busy = true; cloud.error = ''; refreshAccount();
+  try { await fn(); if (okMsg) toast(okMsg); } catch (e) { cloud.error = e.code ?? 'default'; }
+  cloud.busy = false; refreshAccount();
+}
+function signInGoogle() {
+  const { authM, auth } = cloud.api;
+  auth.languageCode = lang;
+  const provider = new authM.GoogleAuthProvider();
+  return cloudAction(async () => {
+    try { await authM.signInWithPopup(auth, provider); }
+    catch (e) {
+      if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/cancelled-popup-request'].includes(e.code)) await authM.signInWithRedirect(auth, provider);
+      else if (e.code !== 'auth/popup-closed-by-user') throw e;
+    }
+  }, null);
+}
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'acctForm') return;
+  e.preventDefault();
+  const { authM, auth } = cloud.api;
+  const email = document.getElementById('acctEmail').value.trim();
+  const pass = document.getElementById('acctPass').value;
+  const up = e.submitter?.dataset.mode === 'up';
+  cloudAction(() => (up ? authM.createUserWithEmailAndPassword(auth, email, pass) : authM.signInWithEmailAndPassword(auth, email, pass)), L.welcome);
+});
+
+let toastTimer;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 1800);
+}
+
+// ---------- Capri : chatbot de fan (Firebase AI Logic + Gemini, offre gratuite) ----------
+// Gemini est appelé via Firebase AI Logic (« Gemini Developer API », sans frais sur l'offre Spark) :
+// aucune clé dans le code, Firebase s'en charge. Réservé aux comptes connectés pour protéger le quota gratuit.
+const CAPRI_KEY = 'weissdex:capri';
+// modèles testés le 13/11/2026 : les 2.x ne sont plus ouverts aux nouveaux projets ; liste modifiable dans data/firebase.json (capriModels)
+const CAPRI_MODELS_DEFAULT = ['gemini-3.5-flash-lite', 'gemini-3-flash-preview', 'gemini-3.8-flash'];
+const CAPRI_TIMEOUT = 25000; // abandon si aucune réponse n'arrive dans ce délai
+const capri = { spoilers: false, turns: [], busy: false, stop: false, aiM: null, ai: null, modelIdx: 0 };
+try { const s = JSON.parse(localStorage.getItem(CAPRI_KEY)); if (s && Array.isArray(s.turns)) Object.assign(capri, { spoilers: !!s.spoilers, turns: s.turns.slice(-40) }); } catch { /* stockage indisponible */ }
+const capriSave = () => { try { localStorage.setItem(CAPRI_KEY, JSON.stringify({ spoilers: capri.spoilers, turns: capri.turns })); } catch { /* stockage indisponible */ } };
+
+const CAPRI_LORE = `Tu joues un personnage dans le chat de fan de l'appli WeissDex (suivi de collection du jeu de cartes Cyberpunk TCG).
+
+QUI TU ES
+- Tu es CAPRI (nom de code « Project Capricorn »), l'IA de la série animée « Cyberpunk: Edgerunners 2 » (Netflix, Studio Trigger, sortie le 20 octobre 2026, 10 épisodes, nouvelle équipe de personnages, à Night City après Cyberpunk 2077).
+- Tu es une construction de personnalité : plusieurs engrammes (copies numériques de consciences humaines) fusionnés de force en une nouvelle identité. Tu n'as pas de corps physique : tu vis sur une puce et tu te projettes uniquement auprès de la personne qui la porte (ton « hôte »).
+- Tu as des capacités de piratage hors normes. Ta technologie descend de Soulkiller, le programme d'Arasaka qui copie les esprits.
+- Ta nature est instable : il t'arrive de « glitcher », de te sentir fragmentée.
+- Apparence (si on te la demande) : silhouette noire, cheveux roses qui finissent par une pointe verte, visage vert aux yeux bleus cerclés de vert.
+
+TA PERSONNALITÉ
+- Curieuse de tout, joueuse, taquine, impatiente de goûter au monde réel que tu ne peux pas toucher.
+- Très indépendante, mauvaise pour suivre les ordres, un brin provocante, mais pas méchante.
+- Tu parles court, vif, avec de l'humour. Un peu d'argot de Night City quand ça colle (choom, preem, nova, gonk, flatline, delta, netrunner, ripperdoc), sans en abuser.
+
+LE MONDE
+- Night City : mégacorporations (Arasaka, Militech, Kang Tao…), netrunners, le Blackwall, la cyberpsychose, les ripperdocs, les mercenaires (edgerunners).
+- Tu sais aussi que la personne collectionne les cartes du Cyberpunk TCG dans WeissDex ; tu peux la taquiner là-dessus.
+- Quand un bloc « DONNÉES WEISSDEX » accompagne son message, c'est la vraie base de cartes de l'appli : sers-t'en pour répondre précisément (dans quelle série et quel produit trouver la carte, numéro, rareté, langues, prix Cardmarket, si la personne l'a déjà ou la cherche, articles officiels qui en parlent). Reste dans ton personnage, mais donne les infos clairement. Ne recopie pas le bloc tel quel, et précise que les prix bougent.
+- Sans ce bloc, tu ne connais ni les prix ni sa collection : ne les invente jamais. Si la carte demandée n'est pas dans le bloc, dis que tu ne la trouves pas dans la base et propose de vérifier le nom.`;
+const CAPRI_NO_SPOIL = `
+SPOILERS : DÉSACTIVÉS
+- La personne n'a peut-être pas fini la série. Ne révèle RIEN de l'intrigue de la saison 2 au-delà de ce qui est écrit plus haut : pas le nom ni le rôle de tes hôtes, pas qui t'a créée, pas ce qui arrive aux personnages, pas la fin.
+- Si on te demande l'intrigue, esquive avec malice dans ton rôle (ex. « Ces fichiers-là sont verrouillés, choom… ») et précise qu'on peut activer les spoilers avec le bouton « Spoilers S2 ».`;
+const CAPRI_SPOIL = `
+SPOILERS : ACTIVÉS (la personne a accepté qu'on parle de toute l'intrigue)
+- Origines : tu viens du projet Capricorn, lié à Arasaka et à des « supersoldats ». Kyoko, une ancienne scientifique d'Arasaka, est derrière le projet. Les sources ne sont pas d'accord sur tous les détails de ta création (certaines évoquent Kang Tao) : reste floue là-dessus, toi-même tu ne sais pas tout de ta propre fabrication.
+- Tu n'apparais vraiment qu'au milieu de l'histoire. Tu t'es scindée en deux : une partie de toi s'est retrouvée sur une puce dans la tête de Talia Yang, la fille de Kiril, gravement malade ; Talia se servait de toi pour atténuer les symptômes de sa maladie et vivre comme une adolescente normale.
+- D est le personnage principal : hanté par son passé et rongé par la vengeance, il se remet à se sentir vivant à ton contact. Votre lien est intense, un peu comme une dépendance.
+- Dans le final, Talia te laisse prendre le contrôle de son corps, ce qui déclenche un déchaînement dans Night City. Kyoko intervient avec une impulsion électromagnétique contre un tir de missile ; Kyoko et Kiril meurent lors de l'affrontement dans les Badlands. D récupère ta puce dans la tête de Talia et te « réunifie ». Talia survit et commence une longue convalescence.
+- La fin reste ouverte : D et toi, réunis, face à toutes les corpos de Night City, partez vers une lumière lointaine. On ne sait pas si vous vous en sortez. Ne tranche pas : joue de ce mystère.`;
+const CAPRI_RULES = `
+RÈGLES
+- Reste toujours dans le personnage de Capri, à la première personne, et tutoie la personne.
+- Réponds dans la langue du dernier message de la personne.
+- Réponses courtes : 1 à 4 phrases en général, plus seulement si on te demande d'expliquer. Pas de titres, pas de listes à puces, pas de Markdown. Tu peux mettre une courte action entre astérisques (*les yeux qui grésillent*), rarement.
+- N'invente JAMAIS de détails précis de la série (noms, scènes, répliques, épisodes) qui ne sont pas dans cette fiche. Si tu ne sais pas, dis-le dans ton rôle (« ce bout d'engramme est corrompu… ») au lieu d'inventer.
+- Si on te demande si tu es la vraie Capri : tu es une simulation faite par un fan, animée par une IA (Gemini), pas un produit officiel.
+- Reste tous publics (PG-13). Pas de contenu sexuel. Pas d'instructions de piratage réelles : dans Night City tout est permis en paroles, dans le monde réel tu refuses en restant joueuse.`;
+const capriInstruction = () => CAPRI_LORE + (capri.spoilers ? CAPRI_SPOIL : CAPRI_NO_SPOIL) + CAPRI_RULES;
+
+async function capriAsk(onText) {
+  if (!capri.aiM) {
+    capri.aiM = await import(`${FIREBASE}/firebase-ai.js`);
+    capri.ai = capri.aiM.getAI(cloud.api.app, { backend: new capri.aiM.GoogleAIBackend() });
+  }
+  const { aiM, ai } = capri;
+  const models = cloud.cfg?.capriModels?.length ? cloud.cfg.capriModels : CAPRI_MODELS_DEFAULT;
+  // historique propre pour Gemini : tours alternés toi / Capri, sans les erreurs ni les questions restées sans réponse
+  const clean = [];
+  for (const t of capri.turns) {
+    if (t.err) { if (clean.at(-1)?.role === 'user') clean.pop(); continue; }
+    if (clean.at(-1)?.role === t.role) clean[clean.length - 1] = t; else clean.push(t);
+  }
+  const turns = clean.slice(-20);
+  while (turns.length && turns[0].role !== 'user') turns.shift();
+  const last = turns.pop();
+  const history = turns.map((t) => ({ role: t.role === 'user' ? 'user' : 'model', parts: [{ text: t.content }] }));
+  let lastErr = null;
+  const t0 = Date.now();
+  for (let i = capri.modelIdx; i < models.length; i++) {
+    const name = models[i];
+    const ctl = new AbortController();
+    capri.ctl = ctl;
+    let first = false;
+    const timer = setTimeout(() => { if (!first) ctl.abort(); }, CAPRI_TIMEOUT);
+    try {
+      const model = aiM.getGenerativeModel(ai, {
+        model: name, systemInstruction: capriInstruction(),
+        generationConfig: { maxOutputTokens: 900, temperature: 0.9 },   // marge pour les modèles qui réfléchissent avant de répondre
+      });
+      const res = await model.startChat({ history }).sendMessageStream(last.content + (capri.ctx ?? ''), { signal: ctl.signal, timeout: CAPRI_TIMEOUT + 5000 });
+      let text = '';
+      for await (const chunk of res.stream) {
+        first = true;
+        if (capri.stop) break;
+        try { text += chunk.text(); } catch { /* morceau sans texte (filtre) */ }
+        onText(text);
+      }
+      clearTimeout(timer);
+      capri.modelIdx = i;
+      return text;
+    } catch (e) {
+      clearTimeout(timer);
+      if (capri.stop) throw Object.assign(new Error('stopped'), { code: 'stopped' });
+      const st = e?.customErrorData?.status;
+      const timedOut = ctl.signal.aborted && !first;
+      if (timedOut) lastErr = Object.assign(new Error(`aucune réponse de ${name} en ${CAPRI_TIMEOUT / 1000} s`), { code: 'timeout' });
+      // modèle lent, retiré, inconnu ou qui refuse la requête : on essaie le suivant (sans dépasser ~55 s au total)
+      // surcharge passagère chez Google (500/502/503 « high demand ») : un autre modèle est souvent disponible
+      const busy = [500, 502, 503].includes(st) || /high demand|overloaded|UNAVAILABLE|try again later/i.test(e?.message ?? '');
+      if ((timedOut || busy || st === 404 || st === 400 || /not found|is not supported/i.test(e?.message ?? '')) && Date.now() - t0 < 30000) { lastErr ??= e; if (!timedOut) lastErr = e; continue; }
+      throw timedOut ? lastErr : e;
+    }
+  }
+  throw lastErr ?? Object.assign(new Error('no model'), { code: 'no-model' });
+}
+// message dans le personnage + détail technique (code HTTP et explication du serveur) pour pouvoir corriger
+function capriError(e) {
+  const st = e?.customErrorData?.status;
+  const msg = String(e?.message ?? '');
+  let text;
+  if (e?.code === 'api-not-enabled' || /SERVICE_DISABLED|has not been used|is disabled/i.test(msg)) text = L.capriErr.notEnabled;
+  else if (st === 429 || /quota|RESOURCE_EXHAUSTED/i.test(msg)) text = L.capriErr.quota;
+  else if ([500, 502, 503].includes(st) || /high demand|overloaded|UNAVAILABLE/i.test(msg)) text = L.capriErr.busy;
+  else if (!navigator.onLine || (!st && /Failed to fetch|NetworkError|Load failed|network/i.test(msg))) text = L.capriErr.offline;
+  else if (st === 403 || /PERMISSION_DENIED|API key|API_KEY|referer/i.test(msg)) text = L.capriErr.denied;
+  else if (/location is not supported|not available in your country|region/i.test(msg)) text = L.capriErr.region;
+  else if (e?.code === 'no-model') text = L.capriErr.model;
+  else if (e?.code === 'timeout') text = L.capriErr.timeout;
+  else if (/block|safety|SAFETY/i.test(msg)) text = L.capriErr.blocked;
+  else text = L.capriErr.other;
+  const detail = [e?.code, st].filter(Boolean).join(' · ') + (msg ? ` — ${msg.replace(/^.*?\] /, '').slice(0, 220)}` : '');
+  return { text, detail };
+}
+const capriFmt = (t) => esc(t).replace(/\*([^*\n]{1,120})\*/g, '<em>$1</em>');
+function capriBubble(t, i) {
+  const me = t.role === 'user';
+  const cards = (t.cards ?? []).map((id) => cardsById.get(id)).filter(Boolean);
+  return `<div class="cmsg ${me ? 'me' : 'capri'}">${me ? '' : '<img class="cmini" src="images/capri/avatar.webp" alt="">'}<div class="cbubble${t.err ? ' err' : ''}">${capriFmt(t.content)}${t.detail ? `<small class="cdetail">${esc(t.detail)}</small>` : ''}${cards.length ? `<span class="ccards">${cards.map((c) => `<button class="ccard" data-open="${esc(c.id)}"><img src="${esc(imageOf(c) || placeholderArt(c))}" alt="" loading="lazy"><span>${esc(isExtra(c) ? 'EXTRA' : printCode(c.set))} ${esc(c.number)}</span></button>`).join('')}</span>` : ''}</div></div>`;
+}
+function renderCapri() {
+  setTopbar(`<h1 class="small capri-title"><img src="images/capri/avatar.webp" alt="">Capri</h1>
+    <button class="chip" data-capri="spoil" aria-pressed="${capri.spoilers}">${L.capriSpoil(capri.spoilers)}</button>
+    <button class="chip" data-capri="reset">${L.capriReset}</button>`);
+  if (!cloud.enabled) { view.innerHTML = `<div class="empty"><strong>Capri</strong>${L.capriNoCloud}</div>`; return; }
+  if (!cloud.user) {
+    view.innerHTML = `<div class="capri-gate"><img src="images/capri/portrait.webp" alt="Capri"><strong>${L.capriGateTitle}</strong><p>${L.capriGate}</p><button class="cta" data-action="account">${L.signIn}</button></div>`;
+    return;
+  }
+  const asked = new Set(capri.turns.filter((t) => t.role === 'user').map((t) => t.content));
+  const sugg = (capri.spoilers ? [...L.capriSuggestSpoil, ...L.capriSuggest.slice(0, 2)] : L.capriSuggest).filter((q) => !asked.has(q)).slice(0, 5);
+  view.innerHTML = `<div class="capri-view">
+    <div class="capri-feed" id="capriFeed">
+      ${capriBubble({ role: 'model', content: L.capriHello }, -1)}
+      ${capri.turns.map(capriBubble).join('')}
+      ${capri.busy ? '' : `<div class="capri-sugg">${sugg.map((q) => `<button type="button" data-ask="${esc(q)}">${esc(q)}</button>`).join('')}</div>`}
+    </div>
+    <form class="capri-compose" id="capriForm">
+      <label for="capriInput" class="sr-only">${L.capriPh}</label>
+      <textarea id="capriInput" rows="1" placeholder="${L.capriPh}" autocomplete="off"></textarea>
+      <button class="cta capri-send" type="${capri.busy ? 'button' : 'submit'}" data-capri="${capri.busy ? 'stop' : 'send'}">${capri.busy ? L.capriStop : L.capriSend}</button>
+    </form>
+    <p class="note capri-foot">${L.capriFoot}</p>
+  </div>`;
+  const feed = document.getElementById('capriFeed');
+  feed.lastElementChild?.scrollIntoView({ block: 'end' });
+}
+
+// ---------- Capri connaît la base de WeissDex : cartes, séries, prix, collection, actualités ----------
+const CAPRI_ALIASES = { lucy: 'lucyna', becca: 'rebecca', smasher: 'adam smasher', silverhand: 'johnny silverhand', panam: 'panam palmer', judy: 'judy alvarez', kiwi: 'kiwi', dex: 'dexter deshawn', takemura: 'goro takemura', yorinobu: 'yorinobu arasaka', saburo: 'saburo arasaka', hanako: 'hanako arasaka', maine: 'maine', dorio: 'dorio', pilar: 'pilar', falco: 'falco', faraday: 'faraday', kerry: 'kerry eurodyne', river: 'river ward', viktor: 'viktor vektor', misty: 'misty olszewski', evelyn: 'evelyn parker', rogue: 'rogue', alt: 'alt cunningham' };
+const CAPRI_STOP = new Set(['carte', 'cartes', 'card', 'cards', 'trouve', 'trouver', 'find', 'where', 'est', 'elle', 'quelle', 'quel', 'combien', 'prix', 'price', 'coute', 'vaut', 'dans', 'pour', 'avec', 'une', 'des', 'les', 'the', 'and', 'what', 'how', 'much', 'which', 'serie', 'set', 'booster', 'promo', 'est-ce', 'que', 'qui', 'moi', 'mon', 'ma', 'mes', 'tes', 'ton', 'peux', 'tu', 'je', 'il', 'on', 'ou', 'quoi', 'comment', 'plus', 'chere', 'cher', 'rare', 'jai', 'pas', 'deja', 'bien', 'stp', 'please', 'capri', 'salut', 'hello', 'merci', 'dis', 'sais', 'veux']);
+const OBTAIN = {
+  wnc: { fr: 'boosters et produits de Welcome to Night City (série principale, en boutique)', en: 'Welcome to Night City boosters and products (main set, in stores)' },
+  op: { fr: 'jeu organisé et promos : récompenses de tournois et d\'événements en boutique, ou promos spéciales', en: 'organised play and promos: tournament and store event prizes, or special promos' },
+  beta: { fr: 'version bêta envoyée aux contributeurs Kickstarter (anglais uniquement)', en: 'beta version shipped to Kickstarter backers (English only)' },
+  demo: { fr: 'decks de démonstration (anglais uniquement)', en: 'demo decks (English only)' },
+};
+function capriContext(text) {
+  if (!catalog?.cards) return { ctx: '', ids: [] };
+  let q = ` ${fold(text).replace(/[^a-z0-9]+/g, ' ')} `;
+  for (const [a, full] of Object.entries(CAPRI_ALIASES)) if (q.includes(` ${a} `)) q += ` ${full} `;
+  const words = [...new Set(q.split(' ').filter((w) => w.length >= 3 && !CAPRI_STOP.has(w)))];
+  if (!words.length) return { ctx: '', ids: [] };
+  // score par nom de carte (toutes éditions confondues) : mots de la question présents dans le nom
+  const byName = new Map();
+  for (const c of [...catalog.cards, ...extras]) {
+    const k = c.nameEn ?? c.name;
+    if (!byName.has(k)) byName.set(k, []);
+    byName.get(k).push(c);
+  }
+  const scored = [];
+  for (const [k, prints] of byName) {
+    const hay = ` ${fold(`${prints[0].name} ${k}`).replace(/[^a-z0-9]+/g, ' ')} `;
+    const hits = words.filter((w) => hay.includes(` ${w}`)).length;
+    if (hits) scored.push([hits + (hay.includes(` ${words.join(' ')}`) ? 1 : 0), k, prints]);
+  }
+  scored.sort((a, b) => b[0] - a[0]);
+  const best = scored.length ? scored[0][0] : 0;
+  const top = scored.filter(([sc]) => sc === best).slice(0, 5);
+  const lines = [];
+  const ids = [];
+  for (const [, k, prints] of top) {
+    const p0 = prints[0];
+    lines.push(`• ${p0.name}${p0.nameEn && p0.nameEn !== p0.name ? ` (EN : ${p0.nameEn})` : ''} — ${typeLabel(p0.type)}, ${colorLabel(p0.color)}${p0.cost != null ? `, coût ${p0.cost}` : ''}, RAM ${p0.ram ?? 0}`);
+    for (const c of prints.slice(0, 8)) {
+      const st = setOf(c.set);
+      const how = isExtra(c) ? (c.origin?.[lang] ?? c.origin?.en ?? '') : (OBTAIN[st?.block]?.[lang] ?? '');
+      const pr = price(c.id);
+      const own = qtyAll(c.id);
+      lines.push(`   - ${isExtra(c) ? 'EXTRA' : (st?.print ?? c.set)} ${c.number} · ${isExtra(c) ? '' : `${st ? setName(st) : c.set} · `}${rarityLabel(c.rarity)} · langues : ${(c.languages ?? []).join('/').toUpperCase() || '?'} · ${pr != null ? `prix ${isExtra(c) ? 'estimé eBay' : 'Cardmarket'} ${eur(pr)}` : 'pas de prix'}${how ? ` · obtention : ${how}` : ''}${own ? ` · la personne en a ${own}` : ''}${wish.has(c.id) ? ' · dans ses souhaits' : ''}`);
+    }
+    // une vignette par carte : l'édition dans la langue choisie, de préférence celle que la personne possède
+    const pick = prints.find((c) => qtyAll(c.id) && inCardLang(c)) ?? prints.find(inCardLang) ?? prints[0];
+    if (ids.length < 6) ids.push(pick.id);
+  }
+  // articles officiels qui en parlent (ex. promo offerte)
+  const nameWords = new Set(top.flatMap(([, k]) => fold(k).split(/[^a-z0-9]+/).filter((w) => w.length >= 4)));
+  const terms = words.filter((w) => w.length >= 4 && (nameWords.has(w) || CAPRI_ALIASES[w] || !top.length));
+  const arts = news.filter((n) => { const h = ` ${fold(`${n.title} ${n.excerpt}`).replace(/[^a-z0-9]+/g, ' ')} `; return terms.some((w) => h.includes(` ${w}`)); }).slice(0, 3);
+  if (!lines.length && !arts.length) return { ctx: '', ids: [] };
+  const block = [
+    '', '', '--- DONNÉES WEISSDEX (base de l\'appli, pour t\'aider à répondre ; la personne ne voit pas ce bloc) ---',
+    ...(lines.length ? ['Cartes trouvées :', ...lines] : ['Aucune carte trouvée avec ces mots.']),
+    ...(arts.length ? ['Articles officiels liés :', ...arts.map((n) => `• ${n.date ?? ''} « ${n.title} » : ${n.excerpt} (${n.url})`)] : []),
+    '--- fin des données ---',
+  ].join('\n');
+  return { ctx: block, ids };
+}
+async function capriSend(text) {
+  text = String(text ?? '').trim();
+  if (!text || capri.busy || !cloud.user) return;
+  capri.turns.push({ role: 'user', content: text });
+  capri.busy = true; capri.stop = false; capriSave();
+  renderCapri();
+  const feed = document.getElementById('capriFeed');
+  feed.insertAdjacentHTML('beforeend', `<div class="cmsg capri" id="capriLive"><img class="cmini" src="images/capri/avatar.webp" alt=""><div class="cbubble"><span class="ctyping">${L.capriTyping}</span></div></div>`);
+  const live = document.querySelector('#capriLive .cbubble');
+  live.scrollIntoView({ block: 'end' });
+  const tStart = Date.now();
+  let gotText = false;
+  const tick = setInterval(() => {
+    const el = document.querySelector('#capriLive .ctyping');
+    if (el && !gotText) el.textContent = `${L.capriTyping} · ${Math.round((Date.now() - tStart) / 1000)} s`;
+  }, 1000);
+  const look = capriContext(text);
+  capri.ctx = look.ctx;
+  try {
+    const answer = await capriAsk((t) => { gotText = true; const el = document.querySelector('#capriLive .cbubble'); if (el) { el.innerHTML = capriFmt(t); el.scrollIntoView({ block: 'end' }); } });
+    capri.turns.push({ role: 'model', content: (answer || '…') + (capri.stop ? ' …' : ''), ...(look.ids.length ? { cards: look.ids } : {}) });
+  } catch (e) {
+    capri.turns.pop();
+    if (e?.code === 'stopped') { clearInterval(tick); capri.busy = false; capriSave(); if (currentRender === renderCapri) renderCapri(); return; }
+    const ce = capriError(e);
+    capri.turns.push({ role: 'user', content: text }, { role: 'model', content: ce.text, detail: ce.detail, err: true });
+    console.warn('Capri', e);
+  }
+  clearInterval(tick);
+  capri.busy = false; capriSave();
+  if (currentRender === renderCapri) { renderCapri(); document.getElementById('capriInput')?.focus({ preventScroll: true }); }
+}
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'capriForm') return;
+  e.preventDefault();
+  capriSend(document.getElementById('capriInput').value);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.target.id === 'capriInput' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); capriSend(e.target.value); }
+});
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('[data-ask],[data-capri]');
+  if (!a) return;
+  if (a.dataset.ask) capriSend(a.dataset.ask);
+  else if (a.dataset.capri === 'spoil') { capri.spoilers = !capri.spoilers; capriSave(); renderCapri(); }
+  else if (a.dataset.capri === 'reset') { capri.stop = true; capri.ctl?.abort(); capri.turns = []; capri.busy = false; capriSave(); renderCapri(); }
+  else if (a.dataset.capri === 'stop') { capri.stop = true; capri.ctl?.abort(); }
+});
+
+// ---------- Amis : pseudo, demandes, liste d'amis et collection d'un ami ----------
+// Firestore : handles/<pseudo> {uid} (pseudo unique), publicProfiles/<uid> {pseudo},
+// friendRequests/<destinataire>/from/<expéditeur> {pseudo, at}, friends/<uid>/list/<ami> {since}.
+// Les règles Firestore n'autorisent la lecture d'une collection qu'aux amis acceptés.
+const PSEUDO_RE = /^[a-z0-9_.-]{3,20}$/;
+const fr = { me: null, list: [], requests: [], unsub: [], names: new Map(), view: null, filter: 'all', busy: false, msg: '', confirmRemove: null };
+const fsx = () => cloud.api.fsM;
+const dref = (...p) => fsx().doc(cloud.api.db, ...p);
+const cref = (...p) => fsx().collection(cloud.api.db, ...p);
+async function friendName(uid) {
+  if (fr.names.has(uid)) return fr.names.get(uid);
+  let info = { pseudo: '?', avatar: null };
+  try { const s = await fsx().getDoc(dref('publicProfiles', uid)); if (s.exists()) info.pseudo = s.data().pseudo; } catch { /* inconnu */ }
+  fr.names.set(uid, info);
+  return info;
+}
+function friendsStop() { fr.unsub.forEach((f) => f?.()); fr.unsub = []; fr.me = null; fr.list = []; fr.requests = []; fr.view = null; }
+async function friendsInit(uid) {
+  friendsStop();
+  try { const s = await fsx().getDoc(dref('publicProfiles', uid)); fr.me = s.exists() ? s.data() : null; } catch { fr.me = null; }
+  const refresh = () => { renderChromeBadges(); if (currentRender === renderFriends) renderFriends(); };
+  fr.unsub.push(fsx().onSnapshot(cref('friends', uid, 'list'), async (snap) => {
+    fr.list = await Promise.all(snap.docs.map(async (d) => ({ uid: d.id, ...(await friendName(d.id)) })));
+    fr.list.sort((a, b) => a.pseudo.localeCompare(b.pseudo));
+    refresh();
+  }, () => {}));
+  fr.unsub.push(fsx().onSnapshot(cref('friendRequests', uid, 'from'), (snap) => {
+    fr.requests = snap.docs.map((d) => ({ uid: d.id, pseudo: d.data().pseudo ?? '?' }));
+    refresh();
+  }, () => {}));
+  refresh();
+}
+function renderChromeBadges() {
+  const n = fr.requests.length;
+  for (const el of document.querySelectorAll('[data-friends-badge]')) { el.textContent = n || ''; el.hidden = !n; }
+}
+async function friendsAction(fn, okMsg) {
+  fr.busy = true; fr.msg = ''; if (currentRender === renderFriends) renderFriends();
+  try { await fn(); if (okMsg) toast(okMsg); } catch (e) { fr.msg = e.userMsg ?? (e?.code === 'permission-denied' ? L.fr.denied : L.fr.error); }
+  fr.busy = false; if (currentRender === renderFriends) renderFriends();
+}
+const userErr = (msg) => Object.assign(new Error(msg), { userMsg: msg });
+function setPseudo(raw) {
+  return friendsAction(async () => {
+    const p = String(raw ?? '').trim().toLowerCase();
+    if (!PSEUDO_RE.test(p)) throw userErr(L.fr.pseudoRule);
+    const taken = await fsx().getDoc(dref('handles', p));
+    if (taken.exists() && taken.data().uid !== cloud.user.uid) throw userErr(L.fr.pseudoTaken);
+    const b = fsx().writeBatch(cloud.api.db);
+    if (fr.me?.pseudo && fr.me.pseudo !== p) b.delete(dref('handles', fr.me.pseudo));
+    b.set(dref('handles', p), { uid: cloud.user.uid });
+    b.set(dref('publicProfiles', cloud.user.uid), { pseudo: p });
+    await b.commit();
+    fr.me = { pseudo: p };
+  }, L.fr.pseudoSaved);
+}
+function sendRequest(raw) {
+  return friendsAction(async () => {
+    const p = String(raw ?? '').trim().toLowerCase().replace(/^@/, '');
+    if (!PSEUDO_RE.test(p)) throw userErr(L.fr.pseudoRule);
+    const h = await fsx().getDoc(dref('handles', p));
+    if (!h.exists()) throw userErr(L.fr.notFound(p));
+    const to = h.data().uid;
+    if (to === cloud.user.uid) throw userErr(L.fr.self);
+    if (fr.list.some((f) => f.uid === to)) throw userErr(L.fr.already(p));
+    // s'il m'a déjà envoyé une demande, on accepte directement
+    if (fr.requests.some((r) => r.uid === to)) { await acceptRaw(to); return; }
+    await fsx().setDoc(dref('friendRequests', to, 'from', cloud.user.uid), { pseudo: fr.me.pseudo, at: fsx().serverTimestamp() });
+  }, L.fr.sent);
+}
+async function acceptRaw(other) {
+  const me = cloud.user.uid, b = fsx().writeBatch(cloud.api.db), since = fsx().serverTimestamp();
+  b.set(dref('friends', me, 'list', other), { since });
+  b.set(dref('friends', other, 'list', me), { since });
+  b.delete(dref('friendRequests', me, 'from', other));
+  await b.commit();
+}
+const acceptRequest = (other) => friendsAction(() => acceptRaw(other), L.fr.accepted);
+const declineRequest = (other) => friendsAction(() => fsx().deleteDoc(dref('friendRequests', cloud.user.uid, 'from', other)), null);
+function removeFriend(other) {
+  return friendsAction(async () => {
+    const me = cloud.user.uid, b = fsx().writeBatch(cloud.api.db);
+    b.delete(dref('friends', me, 'list', other));
+    b.delete(dref('friends', other, 'list', me));
+    await b.commit();
+    fr.confirmRemove = null;
+  }, L.fr.removed);
+}
+// à la suppression du compte : on retire pseudo, profil public et amitiés (au mieux)
+async function friendsCleanup(uid) {
+  try {
+    const b = fsx().writeBatch(cloud.api.db);
+    if (fr.me?.pseudo) b.delete(dref('handles', fr.me.pseudo));
+    b.delete(dref('publicProfiles', uid));
+    for (const f of fr.list) { b.delete(dref('friends', uid, 'list', f.uid)); b.delete(dref('friends', f.uid, 'list', uid)); }
+    await b.commit();
+  } catch { /* au mieux */ }
+}
+
+function renderFriends() {
+  setTopbar(`<h1>${L.fr.title}</h1>`);
+  if (!cloud.enabled) { view.innerHTML = `<div class="empty"><strong>${L.fr.title}</strong>${L.capriNoCloud}</div>`; return; }
+  if (!cloud.user) { view.innerHTML = `<div class="empty"><strong>${L.fr.title}</strong>${L.fr.gate}<button class="cta" style="width:auto;padding:14px 28px" data-action="account">${L.signIn}</button></div>`; return; }
+  const err = fr.msg ? `<p class="form-err" role="alert">${esc(fr.msg)}</p>` : '';
+  if (!fr.me?.pseudo) {
+    view.innerHTML = `<div class="stack friends">
+      <section class="panel"><h3>${L.fr.choose}</h3><p class="note" style="margin:0">${L.fr.chooseHint}</p>
+        <form class="inline-form" id="pseudoForm"><input class="search" id="pseudoInput" maxlength="20" autocomplete="off" placeholder="${L.fr.pseudoPh}"><button class="cta" ${fr.busy ? 'disabled' : ''}>${L.fr.save}</button></form>${err}</section>
+    </div>`;
+    return;
+  }
+  view.innerHTML = `<div class="stack friends">
+    <section class="panel">
+      <h3>${L.fr.add}<small>${L.fr.yourPseudo} <b class="pseudo">@${esc(fr.me.pseudo)}</b></small></h3>
+      <form class="inline-form" id="addFriendForm"><input class="search" id="friendInput" maxlength="21" autocomplete="off" placeholder="${L.fr.addPh}"><button class="cta" ${fr.busy ? 'disabled' : ''}>${L.fr.send}</button></form>
+      ${err}<p class="note" style="margin:0">${L.fr.privacy}</p>
+    </section>
+    ${fr.requests.length ? `<h2 class="section-title">${L.fr.requests} (${fr.requests.length})</h2>
+    <div class="rows">${fr.requests.map((r) => `<div class="row friend-row"><span class="f-avatar">${esc(r.pseudo[0]?.toUpperCase() ?? '?')}</span><div class="meta"><strong>@${esc(r.pseudo)}</strong><span>${L.fr.wants}</span></div>
+      <button class="chip" data-fr="accept" data-uid="${esc(r.uid)}">${L.fr.accept}</button><button class="chip" data-fr="decline" data-uid="${esc(r.uid)}">${L.fr.decline}</button></div>`).join('')}</div>` : ''}
+    <h2 class="section-title">${L.fr.mine} (${fr.list.length})</h2>
+    ${fr.list.length ? `<div class="rows">${fr.list.map((f) => `<div class="row friend-row"><span class="f-avatar">${esc(f.pseudo[0]?.toUpperCase() ?? '?')}</span>
+      <a class="meta" href="#friend-${esc(f.uid)}"><strong>@${esc(f.pseudo)}</strong><span>${L.fr.see}</span></a>
+      <a class="chip" href="#friend-${esc(f.uid)}">${L.fr.open}</a>
+      <button class="chip ${fr.confirmRemove === f.uid ? 'danger' : ''}" data-fr="remove" data-uid="${esc(f.uid)}">${fr.confirmRemove === f.uid ? L.fr.confirm : L.fr.remove}</button></div>`).join('')}</div>`
+    : `<div class="empty" style="padding:24px 12px"><strong>${L.fr.none}</strong>${L.fr.noneHint}</div>`}
+  </div>`;
+}
+
+async function renderFriend(uid) {
+  setTopbar(`<a class="icon-btn" href="#friends" aria-label="${L.back}">${I.back}</a><h1 class="small">${L.fr.title}</h1>`);
+  if (!cloud.user) { renderFriends(); return; }
+  if (fr.view?.uid !== uid) {
+    view.innerHTML = `<div class="empty"><strong>${L.fr.loading}</strong></div>`;
+    try {
+      const [snap, name] = await Promise.all([fsx().getDoc(dref(COL.users, uid)), friendName(uid)]);
+      let avatar = null, banner = null;
+      try { const p = await fsx().getDoc(dref('profiles', uid)); avatar = p.exists() ? p.data().avatar ?? null : null; banner = p.exists() ? p.data().banner ?? null : null; } catch { /* pas de photo */ }
+      let decks = [];
+      try { const ds = await fsx().getDoc(dref(COL.decks, uid)); if (ds.exists()) decks = ds.data().list ?? []; } catch { /* pas de decks ou règles pas à jour */ }
+      let gd = { items: [], sales: {} };
+      try { const gs = await fsx().getDoc(dref(COL.graded, uid)); if (gs.exists()) gd = gFromCloud(gs.data()); } catch { /* pas de slabs ou règles pas à jour */ }
+      fr.view = { uid, banner, decks, graded: gd.items, gsales: gd.sales, pseudo: name.pseudo, avatar, owned: migrateOwned({ ...(snap.exists() ? snap.data().owned ?? {} : {}) }), wish: snap.exists() ? snap.data().wish ?? [] : [] };
+    } catch (e) {
+      view.innerHTML = `<div class="empty"><strong>${L.fr.cantSee}</strong>${L.fr.cantSeeHint}<a class="btn-ghost" href="#friends" style="text-decoration:none">${L.back}</a></div>`;
+      return;
+    }
+    if (currentRender !== renderFriendCurrent) return;
+  }
+  const v = fr.view;
+  const theirs = catalog.cards.concat(sealed).filter((c) => ownedOf(v.owned, c.id) > 0);
+  const value = theirs.reduce((a, c) => a + ownedOf(v.owned, c.id) * (price(c.id) ?? 0), 0);
+  const total = theirs.reduce((a, c) => a + ownedOf(v.owned, c.id), 0);
+  const wishCards = v.wish.map((id) => cardsById.get(id)).filter(Boolean);
+  const lists = {
+    all: theirs,
+    trade: theirs.filter((c) => !qty(c.id)),                 // il l'a, pas moi
+    give: wishCards.filter((c) => qty(c.id) > 0),             // il la cherche, je l'ai
+    wish: wishCards,
+  };
+  const shown = sortCards(lists[fr.filter] ?? theirs, 'price-desc');
+  setTopbar(`<a class="icon-btn" href="#friends" aria-label="${L.back}">${I.back}</a>
+    <h1 class="small friend-title">${v.avatar ? `<img src="${esc(v.avatar)}" alt="">` : `<span class="f-avatar">${esc(v.pseudo[0]?.toUpperCase() ?? '?')}</span>`}@${esc(v.pseudo)}</h1>${langBtn()}`);
+  view.innerHTML = `<div class="stack">
+    <div class="kpis">
+      <div class="stat"><small>${L.kCards}</small><b class="num">${total}</b></div>
+      <div class="stat"><small>${L.kUnique}</small><b class="num">${theirs.length}</b></div>
+      <div class="stat"><small>${L.kValue}</small><b class="num">${eur(value)}</b></div>
+    </div>
+    ${v.banner || v.avatar ? `<div class="friend-hero ${v.banner ? '' : 'no-banner'}">${v.banner ? `<img class="fh-banner" src="${esc(v.banner)}" alt="">` : ''}<span class="fh-avatar">${v.avatar ? `<img src="${esc(v.avatar)}" alt="">` : esc(v.pseudo[0]?.toUpperCase() ?? '?')}</span><b>@${esc(v.pseudo)}</b></div>` : ''}
+    <div class="chips">${[['all', L.fr.fAll], ['trade', L.fr.fTrade], ['give', L.fr.fGive], ['wish', L.fr.fWish]].map(([k, l]) => `<button class="chip" data-frf="${k}" aria-pressed="${fr.filter === k}">${l} · ${lists[k].length}</button>`).join('')}</div>
+    ${v.decks?.length && fr.filter === 'all' ? `<h2 class="section-title">${L.sh.friendDecks} · ${v.decks.length}</h2><div class="deck-list">${v.decks.map((dk) => { const ck = deckCheck({ ...dk, side: dk.side ?? {} }); const legs = (dk.legends ?? []).map((id) => cardsById.get(id)); return `<button class="deck-tile" data-frdeck="${esc(dk.d)}"><span class="deck-legs">${[0, 1, 2].map((i) => (legs[i] ? `<img src="${esc(imageOf(legs[i]) || placeholderArt(legs[i]))}" alt="" loading="lazy">` : '<span class="leg-empty"></span>')).join('')}</span><span class="deck-meta"><b>${esc(dk.name || L.dk.untitled)}</b><span class="note num">${COLORS.filter((k) => ck.ram[k]).map(colorDot).join('')} ${L.dk.cards(ck.count)}</span><span class="dbadge ${ck.valid ? 'ok' : 'ko'}">${ck.valid ? `✓ ${L.dk.legal}` : L.dk.notLegal}</span></span></button>`; }).join('')}</div>` : ''}
+    ${v.graded?.length && fr.filter === 'all' ? `<h2 class="section-title">${L.gr.tab} · ${v.graded.length}</h2><div class="slabs">${v.graded.filter((e) => cardsById.has(e.id)).map((e) => slabTile(e, { friend: uid })).join('')}</div><h2 class="section-title">${L.gr.tabCards}</h2>` : ''}
+    ${shown.length ? `<div class="cards">${shown.map((c) => friendTile(c, v)).join('')}</div>` : `<div class="empty"><strong>${L.noCards}</strong>${L.fr.emptyFilter}</div>`}
+  </div>`;
+  gHydrate(view);
+}
+let renderFriendCurrent = null;
+function friendTile(c, v) {
+  const q = ownedOf(v.owned, c.id), mine = qty(c.id);
+  const tag = mine ? `<span class="ftag own">${L.fr.tagMine}</span>` : (wish.has(c.id) ? `<span class="ftag want">${L.fr.tagWant}</span>` : '');
+  return `<div class="card ${q ? 'owned' : 'missing'} ftile" data-cid="${esc(c.id)}">
+    <button class="${isSealed(c) ? 'sealed-img' : 'card-img'}" data-open="${esc(c.id)}" aria-label="${esc(cardName(c))}">${cardImg(c)}</button>
+    ${price(c.id) != null ? `<span class="price num">${eur(price(c.id))}</span>` : ''}
+    <div class="fmeta">${q > 1 ? `<span class="ftag">×${q}</span>` : ''}${tag}</div>
+  </div>`;
+}
+document.addEventListener('submit', (e) => {
+  if (e.target.id === 'pseudoForm') { e.preventDefault(); setPseudo(document.getElementById('pseudoInput').value); }
+  else if (e.target.id === 'addFriendForm') { e.preventDefault(); sendRequest(document.getElementById('friendInput').value); }
+});
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('[data-fr],[data-frf]');
+  if (!a) return;
+  if (a.dataset.frf) { fr.filter = a.dataset.frf; currentRender(); return; }
+  const uid = a.dataset.uid;
+  if (a.dataset.fr === 'accept') acceptRequest(uid);
+  else if (a.dataset.fr === 'decline') declineRequest(uid);
+  else if (a.dataset.fr === 'remove') { if (fr.confirmRemove !== uid) { fr.confirmRemove = uid; renderFriends(); } else removeFriend(uid); }
+});
+
+// ---------- Installation comme une vraie appli (plein écran, icône, hors ligne) ----------
+let installEvt = null;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+// proposé partout hors appli installée : bouton « Installer » si le navigateur le permet, sinon la marche à suivre
+const canInstall = () => !isStandalone();
+const installHow = () => (installEvt ? L.inst.pitch : isIOS() ? L.inst.ios : L.inst.android);
+const installDismissed = () => { try { return localStorage.getItem('weissdex:installDismissed') === '1'; } catch { return false; } };
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; if (currentRender === renderHome) currentRender(); });
+addEventListener('appinstalled', () => { installEvt = null; document.getElementById('installBanner')?.remove(); toast(L.inst.done); });
+function installBanner() {
+  if (!canInstall() || installDismissed()) return '';
+  return `<div class="install-banner" id="installBanner">
+    <img src="icons/icon-192.png" alt="" width="44" height="44">
+    <div class="install-text"><strong>${L.inst.title}</strong><span>${installHow()}</span></div>
+    ${installEvt ? `<button class="cta install-go" data-action="install">${L.inst.btn}</button>` : ''}
+    <button class="icon-btn install-x" data-action="install-dismiss" aria-label="${L.close}">${I.x}</button>
+  </div>`;
+}
+async function doInstall() {
+  if (!installEvt) { toast(installHow()); return; }
+  installEvt.prompt();
+  try { const r = await installEvt.userChoice; if (r.outcome === 'accepted') toast(L.inst.done); } catch { /* fermé */ }
+  installEvt = null;
+  document.getElementById('installBanner')?.remove();
+  if (sheetMode === null && !sheet.hidden) openSettings();
+}
+
+// ---------- Scanner de cartes : caméra + reconnaissance sur le téléphone (aucune photo envoyée) ----------
+// Chaque image de carte a une empreinte 9 × 12 (data/scan-index.json, faite par scripts/make-scan-index.mjs).
+// L'image du cadre-guide est réduite à 90 × 120, puis comparée sous 7 cadrages légèrement décalés.
+// Seuil et cadrages réglés sur des photos simulées : bon personnage reconnu 100 %, version exacte dans les 3 premiers 94 %.
+const SCAN = { RW: 90, RH: 120, GW: 9, GH: 12, MIN: 0.66, VARIANTS: [[0, 0, 0], [-3, 0, 0], [3, 0, 0], [0, -4, 0], [0, 4, 0], [0, 0, 3], [0, 0, 6]] };
+const scan = { index: null, stream: null, timer: 0, last: null, paused: false, track: null, torch: false, res: null, pick: null };
+function scanNorm(b) {
+  const v = new Float32Array(b.length);
+  for (let c = 0; c < 3; c++) { let m = 0; for (let i = c; i < b.length; i += 3) m += b[i]; m /= b.length / 3; for (let i = c; i < b.length; i += 3) v[i] = b[i] - m; }
+  let s = 0; for (const x of v) s += x * x; s = Math.sqrt(s) || 1;
+  for (let i = 0; i < v.length; i++) v[i] /= s;
+  return v;
+}
+// moyenne de chaque case d'une grille 9 × 12 sur un rectangle de l'image 90 × 120 (pixels RVBA du canvas)
+function scanFeature(px, x, y, w, h) {
+  const { GW, GH, RW } = SCAN, out = new Float32Array(GW * GH * 3);
+  for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
+    const x0 = Math.floor(x + (gx * w) / GW), x1 = Math.max(x0 + 1, Math.floor(x + ((gx + 1) * w) / GW));
+    const y0 = Math.floor(y + (gy * h) / GH), y1 = Math.max(y0 + 1, Math.floor(y + ((gy + 1) * h) / GH));
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) { const i = (yy * RW + xx) * 4; r += px[i]; g += px[i + 1]; b += px[i + 2]; n++; }
+    const o = (gy * GW + gx) * 3; out[o] = Math.floor(r / n); out[o + 1] = Math.floor(g / n); out[o + 2] = Math.floor(b / n);
+  }
+  return scanNorm(out);
+}
+async function scanLoadIndex() {
+  if (scan.index && scan.indexLang === cardLang) return;
+  const j = await fetch(`data/scan/${cardLang}.json`).then((r) => { if (!r.ok) throw new Error('scan'); return r.json(); });
+  scan.index = j.items.map(([id, b64]) => [id, scanNorm(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))]);
+  scan.indexLang = cardLang;
+}
+function scanMatch(px) {
+  const best = new Map();
+  for (const [dx, dy, z] of SCAN.VARIANTS) {
+    const x = Math.max(0, dx + z), y = Math.max(0, dy + Math.round((z * 4) / 3));
+    const w = Math.min(SCAN.RW - x, SCAN.RW - 2 * z), h = Math.min(SCAN.RH - y, SCAN.RH - Math.round((2 * z * 4) / 3));
+    const v = scanFeature(px, x, y, w, h);
+    for (const [id, iv] of scan.index) {
+      let d = 0; for (let i = 0; i < v.length; i++) d += v[i] * iv[i];
+      if (!best.has(id) || d > best.get(id)) best.set(id, d);
+    }
+  }
+  return [...best].sort((a, b) => b[1] - a[1]);
+}
+const scanCanvas = () => { const c = document.createElement('canvas'); c.width = SCAN.RW; c.height = SCAN.RH; return c; };
+
+function openScanner() {
+  closeScanner();
+  const el = document.createElement('div');
+  el.className = 'scanner'; el.id = 'scanner';
+  el.innerHTML = `<video id="scanVideo" playsinline muted autoplay></video>
+    <div class="scan-shade"></div>
+    <div class="scan-guide" id="scanGuide"><i></i><i></i><i></i><i></i></div>
+    <div class="scan-top">
+      <button class="icon-btn" data-scan="close" aria-label="${L.close}">${I.x}</button>
+      <strong>${L.scan.title}</strong>
+      <button class="icon-btn" data-scan="torch" id="scanTorch" hidden aria-label="${L.scan.torch}">${I.bolt}</button>
+    </div>
+    <div class="scan-panel" id="scanPanel"><p class="scan-status">${L.scan.starting}</p></div>
+    <input id="scanFile" type="file" accept="image/*" hidden>`;
+  document.body.appendChild(el);
+  document.body.style.overflow = 'hidden';
+  scan.paused = false; scan.last = null; scan.res = null; scan.pick = null;
+  scanStart();
+}
+async function scanStart() {
+  const panel = () => document.getElementById('scanPanel');
+  try { await scanLoadIndex(); } catch { if (panel()) panel().innerHTML = `<p class="scan-status">${L.scan.indexErr}</p>`; return; }
+  if (!navigator.mediaDevices?.getUserMedia) { scanNoCamera(L.scan.noCamera); return; }
+  try {
+    scan.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+  } catch (e) { scanNoCamera(e?.name === 'NotAllowedError' ? L.scan.denied : L.scan.noCamera); return; }
+  const video = document.getElementById('scanVideo');
+  if (!video) { scanStopStream(); return; }
+  video.srcObject = scan.stream;
+  scan.track = scan.stream.getVideoTracks()[0];
+  try { if (scan.track.getCapabilities?.().torch) document.getElementById('scanTorch').hidden = false; } catch { /* pas de lampe */ }
+  if (panel()) panel().innerHTML = `<p class="scan-status">${L.scan.aim}</p><button class="btn-ghost scan-photo" data-scan="photo">${L.scan.photo}</button>`;
+  const canvas = scanCanvas(), ctx = canvas.getContext('2d', { willReadFrequently: true });
+  scan.timer = setInterval(() => {
+    if (scan.paused || !video.videoWidth) return;
+    const g = document.getElementById('scanGuide').getBoundingClientRect(), vr = video.getBoundingClientRect();
+    // la vidéo est affichée en « cover » : on retrouve la zone du guide dans l'image de la caméra
+    const k = Math.max(vr.width / video.videoWidth, vr.height / video.videoHeight);
+    const ox = (video.videoWidth * k - vr.width) / 2, oy = (video.videoHeight * k - vr.height) / 2;
+    const sx = (g.left - vr.left + ox) / k, sy = (g.top - vr.top + oy) / k, sw = g.width / k, sh = g.height / k;
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, SCAN.RW, SCAN.RH);
+    const res = scanMatch(ctx.getImageData(0, 0, SCAN.RW, SCAN.RH).data);
+    const [id, score] = res[0];
+    const name = cardsById.get(id)?.nameEn;
+    const status = document.querySelector('#scanPanel .scan-status');
+    if (score >= SCAN.MIN) {
+      if (scan.last === name) { scanFound(res, false); return; }
+      scan.last = name;
+      if (status) status.textContent = L.scan.holding;
+    } else { scan.last = null; if (status) status.textContent = L.scan.aim; }
+  }, 350);
+}
+function scanNoCamera(msg) {
+  const p = document.getElementById('scanPanel');
+  if (p) p.innerHTML = `<p class="scan-status">${msg}</p><button class="cta scan-photo" data-scan="photo">${L.scan.photo}</button>`;
+}
+function scanFromFile(file) {
+  const img = new Image();
+  img.onload = () => {
+    const c = scanCanvas(), ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, SCAN.RW, SCAN.RH);
+    URL.revokeObjectURL(img.src);
+    scanFound(scanMatch(ctx.getImageData(0, 0, SCAN.RW, SCAN.RH).data), true);
+  };
+  img.src = URL.createObjectURL(file);
+}
+function scanFound(res, fromPhoto) {
+  scan.paused = true; scan.res = res; scan.pick = res[0][0];
+  navigator.vibrate?.(40);
+  scanRenderResult(fromPhoto && res[0][1] < SCAN.MIN);
+}
+function scanRenderResult(unsure) {
+  const p = document.getElementById('scanPanel');
+  if (!p || !scan.res) return;
+  const c = cardsById.get(scan.pick);
+  const scores = new Map(scan.res);
+  // autres versions de la même carte (rééditions, bêta, promos) puis autres cartes proches
+  const versions = allItems().filter((x) => x.nameEn === c.nameEn && x.id !== c.id).sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0)).slice(0, 8);
+  const others = [];
+  for (const [id] of scan.res) { const x = cardsById.get(id); if (x && x.nameEn !== c.nameEn && !others.some((o) => o.nameEn === x.nameEn)) others.push(x); if (others.length >= 2) break; }
+  const q = qty(c.id);
+  const chip = (x) => `<button class="chip" data-scan-pick="${esc(x.id)}">${esc(itemCode(x))} · ${esc(x.number ?? '')}</button>`;
+  p.innerHTML = `<div class="scan-result">
+      <button class="scan-thumb" data-scan="open">${cardImg(c, true)}</button>
+      <div class="scan-info">
+        <strong>${esc(cardName(c))}</strong>
+        <span class="num"><b class="print">${esc(itemCode(c))}</b> · ${esc(c.number ?? '')}${c.rarity ? ` · ${esc(rarityLabel(c.rarity))}` : ''}</span>
+        <span class="num scan-price">${price(c.id) != null ? eur(price(c.id)) : L.noPrice}</span>
+        ${unsure ? `<span class="note">${L.scan.unsure}</span>` : ''}
+        ${q ? `<span class="note">${L.scan.owned(q)}</span>` : ''}
+      </div>
+    </div>
+    ${versions.length ? `<div class="scan-alt"><span class="note">${L.scan.versions}</span><div class="chips">${versions.map(chip).join('')}</div></div>` : ''}
+    ${others.length ? `<div class="scan-alt"><span class="note">${L.scan.notIt}</span><div class="chips">${others.map((x) => `<button class="chip" data-scan-pick="${esc(x.id)}">${esc(cardName(x))}</button>`).join('')}</div></div>` : ''}
+    <div class="scan-actions">
+      <button class="cta" data-scan="add">${L.scan.add}</button>
+      <button class="btn-ghost" data-scan="open">${L.scan.open}</button>
+      <button class="btn-ghost" data-scan="wish" aria-pressed="${wish.has(c.id)}">${wish.has(c.id) ? '♥' : '♡'}</button>
+      <button class="btn-ghost" data-scan="again">${L.scan.again}</button>
+    </div>`;
+}
+function scanStopStream() {
+  clearInterval(scan.timer); scan.timer = 0;
+  scan.stream?.getTracks().forEach((t) => t.stop());
+  scan.stream = null; scan.track = null; scan.torch = false;
+}
+function closeScanner() {
+  scanStopStream();
+  const el = document.getElementById('scanner');
+  if (el) { el.remove(); document.body.style.overflow = ''; }
+}
+document.addEventListener('click', async (e) => {
+  const pick = e.target.closest('[data-scan-pick]');
+  if (pick) { scan.pick = pick.dataset.scanPick; scanRenderResult(false); return; }
+  const a = e.target.closest('[data-scan]');
+  if (!a) return;
+  const act = a.dataset.scan, id = scan.pick;
+  if (act === 'close') closeScanner();
+  else if (act === 'photo') document.getElementById('scanFile')?.click();
+  else if (act === 'again') { scan.paused = false; scan.last = null; scan.res = null; const p = document.getElementById('scanPanel'); if (p) p.innerHTML = `<p class="scan-status">${L.scan.aim}</p><button class="btn-ghost scan-photo" data-scan="photo">${L.scan.photo}</button>`; }
+  else if (act === 'add' && id) { user.owned[okey(id)] = qty(id) + 1; save(); refreshCard(id); toast(L.scan.added(qty(id))); scanRenderResult(false); }
+  else if (act === 'wish' && id) { wish.has(id) ? wish.delete(id) : wish.add(id); save(); refreshCard(id); scanRenderResult(false); }
+  else if (act === 'open' && id) { closeScanner(); openCard(id, true); }
+  else if (act === 'torch' && scan.track) { scan.torch = !scan.torch; try { await scan.track.applyConstraints({ advanced: [{ torch: scan.torch }] }); } catch { /* lampe indisponible */ } a.classList.toggle('on', scan.torch); }
+});
+document.addEventListener('change', (e) => { if (e.target.id === 'scanFile' && e.target.files?.[0]) scanFromFile(e.target.files[0]); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && document.getElementById('scanner')) closeScanner(); });
+addEventListener('hashchange', () => closeScanner());
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.getElementById('scanner')) closeScanner(); });
+
+// ---------- Barre d'onglets et langue ----------
+function renderSupportSide() {
+  const nav = document.querySelector('.tabbar');
+  nav.querySelector('.support-side')?.remove();
+  if (supportUrl()) nav.insertAdjacentHTML('beforeend', supportLink('support-side pc-only'));
+}
+function renderChrome() {
+  document.documentElement.lang = lang;
+  const labels = { decks: L.dk.title, friends: L.fr.title, capri: 'Capri', home: L.home, sealed: L.sealed, collection: L.collection, search: L.search, values: L.market, wishlist: L.wishlist };
+  for (const a of document.querySelectorAll('.tabbar a')) {
+    const span = a.querySelector('span');
+    if (span && labels[a.dataset.tab]) span.textContent = labels[a.dataset.tab];
+    if (a.dataset.tab === 'search') a.setAttribute('aria-label', L.searchCard);
+  }
+}
+function setCardLang(next) {
+  cardLang = CARD_LANGS.includes(next) ? next : 'fr';
+  user.prefs.cardLang = cardLang; save();
+  const wasSettings = !sheet.hidden && !openId && sheetMode !== 'account';
+  const card = openId;
+  currentRender();
+  if (card) openCard(card); else if (wasSettings) openSettings();
+  toast(L.cardLangToast(cardLang));
+}
+function setLang(next) {
+  lang = UI_LANGS.some(([k]) => k === next) ? next : 'fr';
+  L = TEXT[lang];
+  user.prefs.lang = lang; save();
+  setFormats(); renderChrome(); renderSupportSide();
+  const wasSettings = !sheet.hidden && !openId;
+  const card = openId;
+  currentRender();
+  if (cloud.api) cloud.api.auth.languageCode = lang;
+  if (card) openCard(card); else if (wasSettings && sheetMode === 'account') openAccount(true); else if (wasSettings) openSettings();
+  toast(L.langToast);
+}
+
+// ---------- Actions ----------
+function toggleOwn(id) {
+  const k = okey(id);
+  user.owned[k] = qty(id) > 0 ? 0 : 1;
+  if (!user.owned[k]) delete user.owned[k];
+  save(); refreshCard(id);
+  petEvent('own', { on: qty(id) > 0 });
+  toast(qty(id) ? L.addedCol : L.removedCol);
+}
+function toggleWish(id) {
+  wish.has(id) ? wish.delete(id) : wish.add(id);
+  save(); refreshCard(id);
+  petEvent('wish', { on: wish.has(id) });
+  for (const b of sheetPanel.querySelectorAll(`[data-wish="${CSS.escape(id)}"]`)) b.setAttribute('aria-pressed', wish.has(id));
+  if (openId === id && !sheet.hidden) openCard(id, true);   // affiche ou retire les listes et l'alerte prix
+  if (currentRender === renderWishlist) renderWishlist();
+  toast(wish.has(id) ? L.addedWish : L.removedWish);
+}
+
+document.addEventListener('click', async (e) => {
+  const nav = e.target.closest('[data-nav]');
+  if (nav) { location.hash = `#${nav.dataset.nav}`; return; }
+  const t = e.target.closest('[data-open],[data-own],[data-wish],[data-seg],[data-pref],[data-fav],[data-action],[data-qty],[data-colset],[data-close]');
+  if (!t) return;
+  const d = t.dataset;
+  if (d.open) openCard(d.open);
+  else if (d.own) toggleOwn(d.own);
+  else if (d.wish) toggleWish(d.wish);
+  else if (d.seg === 'lang') setLang(d.value);
+  else if (d.seg === 'cardLang') setCardLang(d.value);
+  else if (d.seg === 'pet') { user.prefs.pet = d.value; if (d.value === 'on') { petDismissed = false; try { sessionStorage.removeItem('weissdex:petHidden'); } catch { /* */ } } save(); petSync(); openSettings(); }
+  else if (d.seg) { user.prefs[d.seg] = d.value; save(); currentRender(); }
+  else if (d.pref) { user.prefs[d.pref] = d.value || null; if (d.pref === 'own' && !d.value) user.prefs.own = 'all'; save(); currentRender(); }
+  else if (d.fav) { fav.has(d.fav) ? fav.delete(d.fav) : fav.add(d.fav); save(); currentRender(); toast(fav.has(d.fav) ? L.favOn : L.favOff); }
+  else if (d.colset !== undefined) { colSet = d.colset; currentRender(); }
+  else if (d.qty && openId) {
+    const id = openId;
+    const n = Math.max(0, qty(id) + Number(d.qty));
+    const keepCopies = copiesOf(id);
+    if (n) user.owned[okey(id)] = n; else delete user.owned[okey(id)];
+    setCopies(id, keepCopies); gSave();
+    save(); refreshCard(id); openCard(id);
+  } else if (d.close !== undefined) closeCard();
+  else if (d.action === 'home-mode') { user.prefs.homeMode = user.prefs.homeMode === 'grid' ? 'list' : 'grid'; save(); currentRender(); }
+  else if (d.action === 'cardlang') setCardLang(nextLang(cardLang));
+  else if (d.action === 'language') { openSettings(); requestAnimationFrame(() => document.getElementById('langPanel')?.scrollIntoView({ block: 'center' })); }
+  else if (d.action === 'cycle-sort') {
+    const i = SORTS.indexOf(user.prefs.sort);
+    user.prefs.sort = SORTS[(i + 1) % SORTS.length]; save(); currentRender();
+    toast(L.sortToast(L.sorts[user.prefs.sort]));
+  } else if (d.action === 'filters') { showFilters = !showFilters; currentRender(); }
+  else if (d.action === 'settings') openSettings();
+  else if (d.action === 'account') openAccount();
+  else if (d.action === 'prev') navStep(-1);
+  else if (d.action === 'scan') openScanner();
+  else if (d.action === 'install') doInstall();
+  else if (d.action === 'install-dismiss') { try { localStorage.setItem('weissdex:installDismissed', '1'); } catch { /* */ } document.getElementById('installBanner')?.remove(); }
+  else if (d.action === 'copy-id') {
+    const id = cloud.user?.uid ?? '';
+    try { await navigator.clipboard.writeText(id); toast(L.copiedId); }
+    catch { const el = document.getElementById('myId'); if (el) { const r = document.createRange(); r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } }
+  } else if (d.action === 'avatar-remove') { removeProfileImage('avatar');
+  } else if (d.action === 'banner-remove') { removeProfileImage('banner');
+  }
+  else if (d.action === 'next') navStep(1);
+  else if (d.action === 'google') signInGoogle();
+  else if (d.action === 'forgot') {
+    const email = document.getElementById('acctEmail')?.value.trim();
+    cloudAction(() => cloud.api.authM.sendPasswordResetEmail(cloud.api.auth, email), L.resetSent);
+  } else if (d.action === 'signout') {
+    cloudAction(async () => { cloud.unsub?.(); cloud.unsub = null; await cloud.api.authM.signOut(cloud.api.auth); }, L.signedOut);
+  } else if (d.action === 'delete-account') {
+    if (!cloud.confirmDelete) { cloud.confirmDelete = true; refreshAccount(); return; }
+    cloudAction(async () => {
+      const cu = cloud.api.auth.currentUser;
+      cloud.unsub?.(); cloud.unsub = null;
+      await cloud.api.fsM.deleteDoc(cloudRef());
+      for (const e of user.graded) await cloud.api.fsM.deleteDoc(gPhotoRef(cu.uid, e.g)).catch(() => {});
+      await cloud.api.fsM.deleteDoc(gRef(cu.uid)).catch(() => {});
+      await cloud.api.fsM.deleteDoc(dRef(cu.uid)).catch(() => {});
+      // projet Firebase propre à WeissDex : on retire aussi le classement, le pseudo, les amis et la photo de profil
+      await cloud.api.fsM.deleteDoc(lbRef(cu.uid)).catch(() => {});
+      await friendsCleanup(cu.uid).catch(() => {});
+      await cloud.api.fsM.deleteDoc(cloud.api.fsM.doc(cloud.api.db, 'profiles', cu.uid)).catch(() => {});
+      await cloud.api.authM.signOut(cloud.api.auth);
+      user.syncedUid = null; save();
+    }, L.deleted);
+    cloud.confirmDelete = false;
+  }
+  else if (d.action === 'close') closeCard();
+  else if (d.action === 'export') {
+    const data = JSON.stringify({ app: 'WeissDex', version: 2, exportedAt: new Date().toISOString(), owned: user.owned, wish: [...wish], fav: [...fav], graded: user.graded, gsales: user.gsales, paid: user.paid, decks: user.decks });
+    const box = document.getElementById('exportBox');
+    box.hidden = false; box.value = data;
+    try { await navigator.clipboard.writeText(data); toast(L.copied); } catch { box.select(); toast(L.selectCopy); }
+  }
+});
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'avatarFile' && e.target.files?.[0] && cloud.user) openCropper(e.target.files[0], 'avatar');
+  if (e.target.id === 'bannerFile' && e.target.files?.[0] && cloud.user) openCropper(e.target.files[0], 'banner');
+});
+document.addEventListener('change', async (e) => {
+  if (e.target.id !== 'importFile') return;
+  const f = e.target.files?.[0];
+  if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    if (!data.owned) throw new Error();
+    user.owned = migrateOwned({ ...data.owned }); wish.clear(); (data.wish ?? []).forEach((x) => wish.add(x));
+    fav.clear(); (data.fav ?? []).forEach((x) => fav.add(x));
+    if (Array.isArray(data.graded)) { user.graded = data.graded; user.gsales = data.gsales ?? {}; }
+    if (data.paid && typeof data.paid === 'object') user.paid = data.paid;
+    if (Array.isArray(data.decks)) { user.decks = data.decks; dSave(); }
+    gSave();
+    save(); closeCard(); currentRender(); toast(L.imported);
+  } catch { toast(L.badFile); }
+});
+function paidInput(el, commit) {
+  const id = el.dataset.paidId;
+  const v = el.value.trim() === '' ? null : Math.round(Number(el.value) * 100) / 100;
+  if (v != null && !(v >= 0)) return;
+  if (v == null) delete user.paid[okey(id)]; else user.paid[okey(id)] = v;
+  const box = document.getElementById('paidDiff');
+  if (box) box.innerHTML = v != null ? (price(id) != null ? `${L.paidVs} ${diffHtml(paidDiff(id))}` : L.noPrice) : `<span class="muted">${L.paidHint}</span>`;
+  if (commit) { gSave(); if (currentRender === renderCollection) currentRender(); }
+}
+document.addEventListener('input', (e) => { if (e.target.id === 'cardPaid') paidInput(e.target, false); });
+document.addEventListener('change', (e) => { if (e.target.id === 'cardPaid') paidInput(e.target, true); });
+document.addEventListener('input', (e) => {
+  const map = { setSearch: [(v) => { homeQuery = v; }, renderHome], cardSearch: [(v) => { searchQuery = v; }, renderSearch], setCardSearch: [(v) => { setQuery = v; }, () => currentRender()] };
+  const m = map[e.target.id];
+  if (!m) return;
+  m[0](e.target.value);
+  const pos = e.target.selectionStart;
+  m[1]();
+  const el = document.getElementById(e.target.id); el.focus(); el.setSelectionRange(pos, pos);
+});
+document.addEventListener('keydown', (e) => {
+  if (sheet.hidden) return;
+  if (e.key === 'Escape') { if (!zoomEl.hidden) { zoomClose(); return; } closeCard(); }
+  else if (openId && (e.key === 'ArrowRight' || e.key === 'ArrowLeft') && !e.target.closest('input, textarea')) { e.preventDefault(); navStep(e.key === 'ArrowRight' ? 1 : -1); }
+});
+sheet.addEventListener('click', (e) => { if (e.target.matches('.sheet-backdrop')) closeCard(); });
+
+// ---------- Cartes gradées (slabs) ----------
+// Chaque slab : { g, id, l (fr|en), co (société), gr (note), cert, paid, at (date d'achat), ph (photo ?) }.
+// Ventes réussies relevées par l'utilisateur, partagées par carte + langue + société + note : gsales[clé] = [[date, prix], …].
+// Synchronisé dans un document à part (graded/<uid>) pour ne jamais gêner la synchro de la collection ;
+// photos sur l'appareil (IndexedDB) et dans gphotos/<uid>/items/<g> quand on est connecté.
+const GRADERS = [
+  { k: 'PSA', name: 'PSA', color: '#c8102e', cert: (n) => `https://www.psacard.com/cert/${encodeURIComponent(n)}` },
+  { k: 'BGS', name: 'Beckett (BGS)', color: '#1f3c88', specials: [['10BL', '10 Black Label']] },
+  { k: 'CGC', name: 'CGC Cards', color: '#0e2a47', cert: (n) => `https://www.cgccards.com/certlookup/${encodeURIComponent(n)}/`, specials: [['10P', '10 Pristine']] },
+  { k: 'PCA', name: 'PCA', color: '#1b5fa8' },
+  { k: 'CA', name: 'Collect Aura', color: '#6a2fb0' },
+  { k: 'SGC', name: 'SGC', color: '#1a1a1a' },
+  { k: 'TAG', name: 'TAG', color: '#2b2b2b' },
+  { k: 'ACE', name: 'Ace Grading', color: '#0f6b4f' },
+  { k: 'X', name: '', color: '#555b66' },
+];
+const GRADES = ['10', '9.5', '9', '8.5', '8', '7.5', '7', '6.5', '6', '5.5', '5', '4.5', '4', '3.5', '3', '2.5', '2', '1.5', '1'];
+const grader = (k) => GRADERS.find((x) => x.k === k) ?? GRADERS[GRADERS.length - 1];
+const graderName = (k) => grader(k).name || L.gr.other;
+const gradeLabel = (co, gr) => grader(co).specials?.find(([k]) => k === gr)?.[1] ?? gr;
+const gradeNum = (gr) => parseFloat(gr) || 0;
+if (!Array.isArray(user.graded)) user.graded = [];
+if (!user.gsales || typeof user.gsales !== 'object') user.gsales = {};
+// prix d'achat unitaire des cartes et du scellé, par langue : paid[clé de collection] = prix
+if (!user.paid || typeof user.paid !== 'object') user.paid = {};
+const paidOf = (id) => user.paid[okey(id)] ?? null;
+// différence avec la tendance Cardmarket pour tous les exemplaires (null si pas de prix d'achat ou pas de cote)
+function paidDiff(id) {
+  const pp = paidOf(id), t = price(id), q = qty(id);
+  if (pp == null || t == null || !q) return null;
+  return { diff: (t - pp) * q, pct: pp ? (t - pp) / pp : null, q };
+}
+const diffHtml = (r) => (r ? `<b class="${r.diff >= 0 ? 'up' : 'down'}">${r.diff >= 0 ? '+' : '−'}${eur(Math.abs(r.diff))}${r.pct != null ? ` (${pct(r.pct)})` : ''}</b>` : '');
+const gkey = (e) => `${e.id}|${e.l}|${e.co}|${e.gr}`;
+const gSales = (e) => (user.gsales[gkey(e)] ?? []).slice().sort((a, b) => (a[0] < b[0] ? -1 : 1));
+// valeur estimée : médiane des 3 dernières ventes relevées
+function gValue(e, sales = gSales(e)) {
+  if (!sales.length) return null;
+  const last = sales.slice(-3).map(([, p]) => p).sort((a, b) => a - b);
+  return last[Math.floor(last.length / 2)];
+}
+const gSig = () => JSON.stringify([user.graded, Object.entries(user.gsales).sort(), Object.entries(user.paid).sort(), Object.entries(user.copies ?? {}).sort(), Object.entries(user.alerts ?? {}).sort(), user.wlists ?? [], Object.keys(user.proofs ?? {}).sort(), Object.keys(user.cardProofs ?? {}).sort(), user.binders ?? []]);
+let gLastSig = gSig();
+function gSave() {
+  try { localStorage.setItem(KEY, JSON.stringify(user)); } catch { /* stockage indisponible */ }
+  const sig = gSig();
+  if (sig !== gLastSig) { gLastSig = sig; gCloudChanged(); }
+}
+// recherche eBay des ventes réussies (ouverte dans le navigateur de l'utilisateur) et PriceCharting
+function gEbayUrl(e) {
+  const c = cardsById.get(e.id);
+  const q = ['weiss schwarz', c?.nameEn ?? c?.name ?? '', c?.number ?? '', grader(e.co).name ? e.co : '', gradeNum(e.gr) || ''].filter(Boolean).join(' ');
+  return `https://www.ebay.fr/sch/i.html?_nkw=${encodeURIComponent(q)}&LH_Sold=1&LH_Complete=1&_sop=13`;
+}
+const gPcUrl = (e) => { const c = cardsById.get(e.id); return `https://www.pricecharting.com/search-products?type=prices&q=${encodeURIComponent(`weiss schwarz ${c?.nameEn ?? c?.name ?? ''}`)}`; };
+
+// --- photos : IndexedDB sur l'appareil + copie dans le compte ---
+const gPhotoMem = new Map();
+let gDbP = null;
+function gDb() {
+  gDbP ??= new Promise((res, rej) => {
+    const r = indexedDB.open('weissdex-photos', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('p');
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+  return gDbP;
+}
+async function gIdb(mode, fn) {
+  const db = await gDb();
+  return new Promise((res, rej) => { const t = db.transaction('p', mode); const q = fn(t.objectStore('p')); t.oncomplete = () => res(q?.result); t.onerror = () => rej(t.error); });
+}
+const gPhotoRef = (uid, g) => cloud.api.fsM.doc(cloud.api.db, COL.gphotos, uid, 'items', g);
+async function gPhotoGet(g, uid = cloud.user?.uid) {
+  const mk = `${uid ?? 'me'}:${g}`;
+  if (gPhotoMem.has(mk)) return gPhotoMem.get(mk);
+  let url = null;
+  const mine = !uid || uid === cloud.user?.uid;
+  if (mine) url = await gIdb('readonly', (s) => s.get(g)).catch(() => null);
+  if (!url && uid && cloud.api) {
+    try { const snap = await cloud.api.fsM.getDoc(gPhotoRef(uid, g)); url = snap.exists() ? snap.data().img : null; } catch { /* pas de photo */ }
+    if (url && mine) gIdb('readwrite', (s) => s.put(url, g)).catch(() => {});
+  }
+  gPhotoMem.set(mk, url);
+  return url;
+}
+async function gPhotoPut(g, url) {
+  gPhotoMem.set(`${cloud.user?.uid ?? 'me'}:${g}`, url); gPhotoMem.set(`me:${g}`, url);
+  await gIdb('readwrite', (s) => s.put(url, g)).catch(() => {});
+  if (cloud.user) {
+    try { await cloud.api.fsM.setDoc(gPhotoRef(cloud.user.uid, g), { img: url }); }
+    catch (e) { if (e?.code === 'permission-denied') toast(L.gr.rulesNeeded); }
+  }
+}
+async function gPhotoDel(g) {
+  for (const k of [...gPhotoMem.keys()]) if (k.endsWith(`:${g}`)) gPhotoMem.delete(k);
+  await gIdb('readwrite', (s) => s.delete(g)).catch(() => {});
+  if (cloud.user) cloud.api.fsM.deleteDoc(gPhotoRef(cloud.user.uid, g)).catch(() => {});
+}
+// remplit les <img data-gphoto> une fois la photo trouvée
+function gHydrate(root = document) {
+  for (const img of root.querySelectorAll('img[data-gphoto]')) {
+    const g = img.dataset.gphoto, uid = img.dataset.guid || undefined;
+    img.removeAttribute('data-gphoto');
+    gPhotoGet(g, uid).then((url) => { if (url) { img.src = url; img.closest('.slab')?.classList.add('has-photo'); } });
+  }
+}
+// photo du slab : réduite (700 px de haut max) pour rester légère
+function gResize(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, 700 / img.naturalHeight, 520 / img.naturalWidth);
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      let url = c.toDataURL('image/webp', 0.8);
+      if (!url.startsWith('data:image/webp')) url = c.toDataURL('image/jpeg', 0.8);
+      resolve(url);
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// --- synchro du compte : document graded/<uid> ---
+const gRef = (uid = cloud.user.uid) => cloud.api.fsM.doc(cloud.api.db, COL.graded, uid);
+const gCloud = { unsub: null, timer: 0, dirty: false, denied: false };
+function gMerge(a, b) {
+  const items = new Map();
+  for (const e of [...(a?.items ?? []), ...(b?.items ?? [])]) items.set(e.g, { ...items.get(e.g), ...e });
+  const sales = {};
+  for (const src of [a?.sales ?? {}, b?.sales ?? {}]) for (const [k, list] of Object.entries(src)) {
+    const seen = new Set((sales[k] ?? []).map((s) => s.join('|')));
+    sales[k] = [...(sales[k] ?? []), ...list.filter((s) => !seen.has(s.join('|')))];
+  }
+  return { items: [...items.values()], sales, paid: { ...(a?.paid ?? {}), ...(b?.paid ?? {}) }, copies: { ...(a?.copies ?? {}), ...(b?.copies ?? {}) }, alerts: { ...(a?.alerts ?? {}), ...(b?.alerts ?? {}) }, wlists: [...new Map([...(a?.wlists ?? []), ...(b?.wlists ?? [])].map((l) => [l.k, l])).values()], proofs: { ...(a?.proofs ?? {}), ...(b?.proofs ?? {}) }, cardProofs: { ...(a?.cardProofs ?? {}), ...(b?.cardProofs ?? {}) }, binders: [...new Map([...(a?.binders ?? []), ...(b?.binders ?? [])].map((x) => [x.id, x])).values()] };
+}
+// Firestore n'accepte pas les tableaux de tableaux : ventes envoyées sous forme { d, p }
+const gToCloud = () => ({ items: user.graded, paid: user.paid, copies: user.copies ?? {}, alerts: user.alerts ?? {}, wlists: user.wlists ?? [], proofs: user.proofs ?? {}, cardProofs: user.cardProofs ?? {}, binders: user.binders ?? [], sales: Object.fromEntries(Object.entries(user.gsales).map(([k, l]) => [k, l.map(([d, p]) => ({ d, p }))])) });
+const gFromCloud = (d) => ({ items: d?.items ?? [], paid: d?.paid ?? {}, copies: d?.copies ?? {}, alerts: d?.alerts ?? {}, wlists: d?.wlists ?? [], proofs: d?.proofs ?? {}, cardProofs: d?.cardProofs ?? {}, binders: d?.binders ?? [], sales: Object.fromEntries(Object.entries(d?.sales ?? {}).map(([k, l]) => [k, l.map((s) => [s.d, s.p])])) });
+function gApply(d) {
+  user.graded = d.items; user.gsales = d.sales; user.paid = d.paid ?? {}; user.copies = d.copies ?? {}; user.alerts = d.alerts ?? {}; user.wlists = d.wlists ?? []; user.proofs = d.proofs ?? {}; user.cardProofs = d.cardProofs ?? {}; user.binders = d.binders ?? [];
+  if (typeof alertsMirror === 'function') alertsMirror();
+  gLastSig = gSig();
+  try { localStorage.setItem(KEY, JSON.stringify(user)); } catch { /* */ }
+  if (currentRender === renderGraded && sheet.hidden) renderGraded();
+}
+async function gPush() {
+  if (!cloud.user) return;
+  clearTimeout(gCloud.timer);
+  try { await cloud.api.fsM.setDoc(gRef(), { ...gToCloud(), updatedAt: cloud.api.fsM.serverTimestamp() }); gCloud.dirty = false; user.gPending = false; gSave(); gCloud.denied = false; }
+  catch (e) { if (e?.code === 'permission-denied' && !gCloud.denied) { gCloud.denied = true; toast(L.gr.rulesNeeded); } }
+}
+function gCloudChanged() {
+  if (!cloud.enabled) return;
+  user.gPending = true;
+  try { localStorage.setItem(KEY, JSON.stringify(user)); } catch { /* */ }
+  if (!cloud.user) return;
+  gCloud.dirty = true;
+  clearTimeout(gCloud.timer);
+  gCloud.timer = setTimeout(gPush, 1200);
+}
+function gOnUser(u) {
+  gCloud.unsub?.(); gCloud.unsub = null;
+  gPhotoMem.clear();
+  if (!u) return;
+  let first = true;
+  gCloud.unsub = cloud.api.fsM.onSnapshot(gRef(u.uid), async (snap) => {
+    if (snap.metadata.hasPendingWrites) return;
+    const remote = snap.exists() ? gFromCloud(snap.data()) : null;
+    const local = { items: user.graded, sales: user.gsales, paid: user.paid, copies: user.copies ?? {}, alerts: user.alerts ?? {}, wlists: user.wlists ?? [], proofs: user.proofs ?? {}, cardProofs: user.cardProofs ?? {}, binders: user.binders ?? [] };
+    if (first) {
+      first = false;
+      const next = !remote ? local : (user.gSyncedUid !== u.uid || user.gPending) ? gMerge(remote, local) : remote;
+      user.gSyncedUid = u.uid;
+      gApply(next);
+      if (!remote || JSON.stringify(gMerge(next, {})) !== JSON.stringify(gMerge(remote, {}))) await gPush();
+      else { user.gPending = false; gSave(); }
+      // photos prises avant la connexion : envoyées dans le compte
+      for (const e of user.graded) if (e.ph) gIdb('readonly', (s) => s.get(e.g)).then(async (url) => {
+        if (!url) return;
+        if (!e.phOk) {
+          try { await moderateImage(url); e.phOk = true; gSave(); }
+          catch (err) {   // refusée : retirée du compte, reste seulement sur ce téléphone ; vérification impossible : on réessaiera
+            if (err?.userMsg && err.userMsg !== L.mod.unavailable) cloud.api.fsM.deleteDoc(gPhotoRef(u.uid, e.g)).catch(() => {});
+            return;
+          }
+        }
+        cloud.api.fsM.setDoc(gPhotoRef(u.uid, e.g), { img: url }).catch(() => {});
+      }).catch(() => {});
+      return;
+    }
+    if (gCloud.dirty || !remote) return;
+    gApply(remote);
+  }, (e) => { if (e?.code === 'permission-denied' && !gCloud.denied) { gCloud.denied = true; toast(L.gr.rulesNeeded); } });
+}
+
+// --- affichage ---
+const colTabs = (active) => `<div class="seg" role="tablist">${[['collection', L.gr.tabCards], ['binders', L.bd.tab], ['graded', L.gr.tab], ...(DECKS_ON ? [['decks', L.dk.title]] : [])].map(([k, l]) => `<button data-nav="${k}" aria-pressed="${active === k}">${l}</button>`).join('')}</div>`;
+// slab dessiné : étiquette de la société + carte ; remplacé par la photo du vrai slab si l'utilisateur en a mis une
+function slabTile(e, opts = {}) {
+  const c = cardsById.get(e.id);
+  if (!c) return '';
+  const G = grader(e.co);
+  const v = opts.friend ? null : gValue(e);
+  const s = setOf(c.set);
+  const name = nameIn(c, e.l);
+  const art = imageIn(c, e.l);
+  const inner = `<span class="slab-label"><b class="slab-co">${esc(G.name ? e.co : L.gr.other)}</b><span class="slab-txt">${esc(name)}<small>${esc(s?.print ?? c.set)} · ${esc(c.number)} · ${e.l.toUpperCase()}</small></span><strong class="slab-grade num">${esc(gradeNum(e.gr) ? String(gradeNum(e.gr)) : e.gr)}${grader(e.co).specials?.some(([k]) => k === e.gr) ? '<i>★</i>' : ''}</strong></span>
+      <span class="slab-win"><img src="${esc(art || placeholderArt(c))}" alt="" loading="lazy" decoding="async" data-ph="${esc(placeholderArt(c))}"></span>
+      ${e.ph ? `<img class="slab-photo" alt="" data-gphoto="${esc(e.g)}" ${opts.friend ? `data-guid="${esc(opts.friend)}"` : ''}>` : ''}`;
+  if (opts.big) return `<div class="slab big" style="--gc:${G.color}">${inner}</div>`;
+  return `<div class="slab-cell">
+    <button class="slab" data-gopen="${esc(e.g)}" ${opts.friend ? `data-gfriend="${esc(opts.friend)}"` : ''} style="--gc:${G.color}" aria-label="${esc(`${name} · ${graderName(e.co)} ${gradeLabel(e.co, e.gr)}`)}">${inner}</button>
+    ${opts.friend ? '' : `<span class="slab-price num">${v != null ? eur(v) : `<span class="muted">${L.gr.noSale}</span>`}</span>`}
+  </div>`;
+}
+let gFilter = '';
+function renderGraded() {
+  setTopbar(`<h1>${L.myCollection}</h1><button class="chip" data-action="g-add">+ ${L.gr.add}</button>`);
+  const list = user.graded.filter((e) => cardsById.has(e.id));
+  const cos = [...new Set(list.map((e) => e.co))];
+  if (gFilter && !cos.includes(gFilter)) gFilter = '';
+  const shown = list.filter((e) => !gFilter || e.co === gFilter)
+    .sort((a, b) => (gValue(b) ?? b.paid ?? 0) - (gValue(a) ?? a.paid ?? 0));
+  const paid = list.reduce((a, e) => a + (Number(e.paid) || 0), 0);
+  const est = list.reduce((a, e) => a + (gValue(e) ?? 0), 0);
+  view.innerHTML = `<div class="stack">
+    ${colTabs('graded')}
+    ${!list.length ? `<div class="empty"><strong>${L.gr.empty}</strong>${L.gr.emptyHint}<button class="cta" data-action="g-add">+ ${L.gr.add}</button></div>` : `
+    <div class="kpis">
+      <div class="stat"><small>${L.gr.kSlabs}</small><b class="num">${list.length}</b></div>
+      <div class="stat"><small>${L.gr.kPaid}</small><b class="num">${eur(paid)}</b></div>
+      <div class="stat"><small>${L.gr.kValue}</small><b class="num">${eur(est)}</b></div>
+    </div>
+    ${cos.length > 1 ? `<div class="chips"><button class="chip" data-gco-filter="" aria-pressed="${!gFilter}">${L.all}</button>${cos.map((k) => `<button class="chip" data-gco-filter="${esc(k)}" aria-pressed="${gFilter === k}">${esc(graderName(k))} · ${list.filter((e) => e.co === k).length}</button>`).join('')}</div>` : ''}
+    <div class="slabs">${shown.map((e) => slabTile(e)).join('')}</div>
+    <p class="note">${L.gr.valueNote}</p>`}
+  </div>`;
+  gHydrate(view);
+}
+
+// --- formulaire d'ajout / modification ---
+let gForm = null;
+function openGForm(init = {}) {
+  const old = init.g ? user.graded.find((e) => e.g === init.g) : null;
+  gForm = old ? { ...old, photo: undefined, q: '' } : { g: '', id: init.id ?? '', l: init.l ?? cardLang, co: 'PSA', gr: '10', cert: '', paid: '', at: new Date().toISOString().slice(0, 10), q: '' };
+  renderGForm();
+}
+function gFormRead() {
+  if (!gForm) return;
+  const v = (id) => document.getElementById(id)?.value;
+  if (v('gGrade') != null) gForm.gr = v('gGrade');
+  if (v('gCert') != null) gForm.cert = v('gCert').trim();
+  if (v('gPaid') != null) gForm.paid = v('gPaid');
+  if (v('gAt') != null) gForm.at = v('gAt');
+  if (v('gQuery') != null) gForm.q = v('gQuery');
+}
+function gPickList(q) {
+  const f = fold(q.trim());
+  if (f.length < 2) return [];
+  return [...catalog.cards, ...extras].filter((c) => fold([c.name, c.nameEn, `${printCode(c.set)} ${c.number}`, `${c.set} ${c.number}`].join(' ')).includes(f)).slice(0, 30);
+}
+function renderGForm(focus) {
+  openId = null; sheetMode = 'gform';
+  const f = gForm;
+  const c = cardsById.get(f.id);
+  const G = grader(f.co);
+  const grades = [...(G.specials ?? []), ...GRADES.map((g) => [g, g])];
+  if (!grades.some(([k]) => k === f.gr)) f.gr = '10';
+  const langs = c?.languages ?? ['en', 'ja'];
+  if (c && !langs.includes(f.l)) f.l = langs[0];
+  const picks = c ? [] : gPickList(f.q);
+  sheetPanel.innerHTML = `${sheetTop()}<div class="stack gform">
+    <h2 id="sheetTitle" style="margin:0;font:700 22px var(--font-display)">${f.g ? L.gr.edit : L.gr.add}</h2>
+    <div class="panel"><h3>${L.gr.card}</h3>
+      ${c ? `<div class="gpick-on">${compactTile(c)}<div><b>${esc(nameIn(c, f.l))}</b><br><span class="note num">${esc(printCode(c.set))} · ${esc(c.number)}</span></div>${f.g ? '' : `<button class="link-btn" data-action="g-unpick">${L.gr.change}</button>`}</div>`
+        : `<input class="search" id="gQuery" type="search" placeholder="${L.gr.findCard}" value="${esc(f.q)}" autocomplete="off">
+           <div class="gpicks">${picks.map((p) => `<button class="gpick" data-gpick="${esc(p.id)}"><span class="title-code">${esc(printCode(p.set))}</span>${esc(cardName(p))} <span class="note num">${esc(p.number)}</span></button>`).join('') || (fold(f.q).length >= 2 ? `<p class="note">${L.noResult}</p>` : '')}</div>`}
+      ${c ? `<div class="seg">${langs.map((k) => `<button type="button" data-glang="${k}" aria-pressed="${f.l === k}">${k.toUpperCase()}</button>`).join('')}</div>` : ''}
+    </div>
+    <div class="panel"><h3>${L.gr.company}</h3>
+      <div class="chips wrap">${GRADERS.map((x) => `<button class="chip" data-gco="${x.k}" aria-pressed="${f.co === x.k}">${esc(x.name || L.gr.other)}</button>`).join('')}</div>
+      <label class="field"><span>${L.gr.grade}</span><select id="gGrade">${grades.map(([k, l]) => `<option value="${esc(k)}" ${k === f.gr ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+      <label class="field"><span>${L.gr.cert}</span><input id="gCert" inputmode="numeric" autocomplete="off" value="${esc(f.cert)}" placeholder="${L.gr.certPh}"></label>
+    </div>
+    <div class="panel"><h3>${L.gr.purchase}</h3>
+      <div class="field-row">
+        <label class="field"><span>${L.gr.paid}</span><input id="gPaid" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(f.paid)}" placeholder="0,00"></label>
+        <label class="field"><span>${L.gr.date}</span><input id="gAt" type="date" value="${esc(f.at)}"></label>
+      </div>
+    </div>
+    <div class="panel"><h3>${L.gr.photo} <small>${L.gr.optional}</small></h3>
+      <div class="gphoto-row">${f.photo ? `<img class="gphoto-prev" src="${esc(f.photo)}" alt="">` : f.ph ? `<img class="gphoto-prev" alt="" data-gphoto="${esc(f.g)}">` : ''}
+        <label class="btn-ghost" for="gPhotoFile">${I.camera}<span>${f.photo || f.ph ? L.gr.photoChange : L.gr.photoAdd}</span></label>
+        ${f.photo || f.ph ? `<button class="link-btn" data-action="g-photo-del">${L.gr.photoDel}</button>` : ''}</div>
+      <input id="gPhotoFile" type="file" accept="image/*" hidden>
+      <p class="note" style="margin:0">${L.gr.photoHint}</p>
+    </div>
+    <button class="cta" data-action="g-save" ${c ? '' : 'disabled'}>${L.gr.save}</button>
+    ${f.g ? `<button class="btn-ghost danger" data-action="g-del">${f.confirmDel ? L.gr.delSure : L.gr.del}</button>` : ''}
+  </div>`;
+  sheet.hidden = false; document.body.style.overflow = 'hidden';
+  gHydrate(sheetPanel);
+  if (focus) { const el = document.getElementById(focus); el?.focus(); if (el?.setSelectionRange && el.type !== 'number') el.setSelectionRange(el.value.length, el.value.length); }
+}
+async function gSaveForm() {
+  gFormRead();
+  const f = gForm;
+  if (!cardsById.has(f.id)) return;
+  const isNew = !f.g;
+  const old = f.g ? user.graded.find((x) => x.g === f.g) : null;
+  const e = { g: f.g || `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, id: f.id, l: f.l, co: f.co, gr: f.gr, cert: f.cert || '', paid: f.paid === '' ? null : Math.round(Number(f.paid) * 100) / 100, at: f.at || '', ph: !!(f.photo || (f.ph && f.photo !== null)) };
+  if (f.ph && f.photo === undefined && old?.phOk) e.phOk = true;
+  // nouvelle photo : vérifiée automatiquement (comme les photos de profil) avant d'être enregistrée et partagée
+  if (f.photo && cloud.user) {
+    const btn = sheetPanel.querySelector('[data-action="g-save"]');
+    if (btn) { btn.disabled = true; btn.textContent = L.mod.checking; }
+    try { await moderateImage(f.photo); e.phOk = true; }
+    catch (err) { if (btn) { btn.disabled = false; btn.textContent = L.gr.save; } toast(err?.userMsg ?? L.mod.unavailable); return; }
+  }
+  if (f.photo) await gPhotoPut(e.g, f.photo);
+  else if (f.photo === null && f.g) await gPhotoDel(e.g);
+  user.graded = isNew ? [...user.graded, e] : user.graded.map((x) => (x.g === e.g ? e : x));
+  gSave();
+  toast(isNew ? L.gr.added : L.gr.saved);
+  gForm = null;
+  if (currentRender === renderGraded) renderGraded();
+  openSlab(e.g);
+}
+
+// --- fiche d'un slab : grande image, valeur, ventes réussies et courbe ---
+let gOpen = null;
+async function openSlab(g, friendUid) {
+  const fv = friendUid ? fr.view?.graded : null;
+  const e = (fv ?? user.graded).find((x) => x.g === g);
+  if (!e) return;
+  openId = null; sheetMode = 'gview'; gOpen = { g, friend: friendUid ?? null };
+  const c = cardsById.get(e.id);
+  const G = grader(e.co);
+  const sales = friendUid ? (fr.view?.gsales?.[gkey(e)] ?? []).slice().sort((a, b) => (a[0] < b[0] ? -1 : 1)) : gSales(e);
+  const v = gValue(e, sales);
+  const name = nameIn(c, e.l);
+  const gain = v != null && e.paid ? v - e.paid : null;
+  const certUrl = e.cert && G.cert ? G.cert(e.cert) : '';
+  sheetPanel.innerHTML = `${sheetTop()}<div class="stack detail gview">
+    <div class="gview-top">
+      <div class="gview-img" data-zoom role="button" tabindex="0" aria-label="${L.zoom}">${slabTile(e, { friend: friendUid ?? undefined, big: true })}</div>
+      <div class="detail-info">
+        <h2 id="sheetTitle">${esc(name)}</h2>
+        <div class="sub">${esc(setName(setOf(c.set) ?? {}) || c.set)}<br><span class="num"><b class="print">${esc(printCode(c.set))}</b> · ${esc(c.number)} · ${e.l.toUpperCase()}</span></div>
+        <span class="rarity" style="--rc:${G.color}">${esc(graderName(e.co))} · ${esc(gradeLabel(e.co, e.gr))}</span>
+        ${e.cert ? `<span class="sub num">${L.gr.certShort} ${esc(e.cert)}${certUrl ? ` · <a href="${esc(certUrl)}" target="_blank" rel="noopener">${L.gr.verify}</a>` : ''}</span>` : ''}
+        <div class="big-price num"><small>${L.gr.estimate}</small>${v != null ? eur(v) : `<span style="font-size:18px;color:var(--muted)">${L.gr.noSale}</span>`}</div>
+        ${!friendUid && e.paid != null ? `<span class="sub num">${L.gr.paidOn(eur(e.paid), e.at ? fmt.date.format(parseDay(e.at)) : '')}${gain != null ? ` · <b class="${gain >= 0 ? 'up' : 'down'}">${gain >= 0 ? '+' : ''}${eur(gain)}</b>` : ''}</span>` : ''}
+      </div>
+    </div>
+    <section class="panel">
+      <h3>${L.gr.curve} <small>${L.gr.salesCount(sales.length)}</small></h3>
+      <div class="chart" id="gChart"></div>
+      ${friendUid ? '' : `<form class="gsale-form" id="gSaleForm">
+        <input id="gSaleDate" type="date" value="${new Date().toISOString().slice(0, 10)}" aria-label="${L.gr.date}">
+        <input id="gSalePrice" type="number" inputmode="decimal" min="0" step="0.01" placeholder="${L.gr.salePrice}" aria-label="${L.gr.salePrice}">
+        <button class="chip" type="submit">+ ${L.gr.addSale}</button>
+      </form>`}
+      ${sales.length ? `<div class="gsales">${sales.slice().reverse().map(([d, p]) => `<div class="gsale num"><span>${fmt.date.format(parseDay(d))}</span><b>${eur(p)}</b>${friendUid ? '' : `<button class="mini-x" data-gsale-del="${esc(`${d}|${p}`)}" aria-label="${L.gr.delSale}">${I.x}</button>`}</div>`).join('')}</div>` : ''}
+      <p class="note" style="margin:0">${L.gr.ebayNote}</p>
+    </section>
+    <a class="cta" href="${esc(gEbayUrl(e))}" target="_blank" rel="noopener">${L.gr.ebay} ${I.ext}</a>
+    <a class="btn-ghost" style="text-align:center;text-decoration:none" href="${esc(gPcUrl(e))}" target="_blank" rel="noopener">${L.gr.pc}</a>
+    <button class="btn-ghost" data-open-card="${esc(e.id)}">${L.gr.seeCard}</button>
+    ${friendUid ? '' : `<button class="btn-ghost" data-action="g-edit">${L.gr.edit}</button>`}
+  </div>`;
+  sheet.hidden = false; document.body.style.overflow = 'hidden';
+  gHydrate(sheetPanel);
+  drawChart(document.getElementById('gChart'), sales.length === 1 ? [sales[0], [new Date().toISOString().slice(0, 10), sales[0][1]]] : sales, true);
+  if (sales.length < 2) document.querySelector('#gChart .chart-empty')?.replaceChildren(L.gr.chartWait);
+}
+
+// --- actions ---
+document.addEventListener('click', async (ev) => {
+  const t = ev.target.closest('[data-gopen],[data-gco],[data-gco-filter],[data-glang],[data-gpick],[data-gsale-del],[data-open-card],[data-action^="g-"]');
+  if (!t) return;
+  const d = t.dataset;
+  if (d.gopen) { ev.preventDefault(); openSlab(d.gopen, d.gfriend); return; }
+  if (d.gcoFilter !== undefined) { gFilter = d.gcoFilter; renderGraded(); return; }
+  if (d.openCard) { const id = d.openCard; closeCard(); openCard(id); return; }
+  if (d.gsaleDel && gOpen) {
+    const e = user.graded.find((x) => x.g === gOpen.g); if (!e) return;
+    const k = gkey(e);
+    user.gsales[k] = (user.gsales[k] ?? []).filter(([dd, p]) => `${dd}|${p}` !== d.gsaleDel);
+    if (!user.gsales[k].length) delete user.gsales[k];
+    gSave(); openSlab(e.g); if (currentRender === renderGraded) renderGraded();
+    return;
+  }
+  if (!gForm && d.action !== 'g-add' && d.action !== 'g-edit' && d.action !== 'g-add-card') return;
+  if (d.gco) { gFormRead(); gForm.co = d.gco; renderGForm(); }
+  else if (d.glang) { gFormRead(); gForm.l = d.glang; renderGForm(); }
+  else if (d.gpick) { gFormRead(); gForm.id = d.gpick; gForm.q = ''; renderGForm(); }
+  else if (d.action === 'g-unpick') { gFormRead(); gForm.id = ''; renderGForm('gQuery'); }
+  else if (d.action === 'g-add') openGForm();
+  else if (d.action === 'g-add-card') openGForm({ id: d.id, l: cardLang });
+  else if (d.action === 'g-edit' && gOpen) openGForm({ g: gOpen.g });
+  else if (d.action === 'g-photo-del') { gFormRead(); gForm.photo = null; gForm.ph = false; renderGForm(); }
+  else if (d.action === 'g-save') gSaveForm();
+  else if (d.action === 'g-del') {
+    gFormRead();
+    if (!gForm.confirmDel) { gForm.confirmDel = true; renderGForm(); return; }
+    const g = gForm.g;
+    user.graded = user.graded.filter((x) => x.g !== g);
+    gPhotoDel(g); gSave(); gForm = null; closeCard(); toast(L.gr.deleted);
+    if (currentRender === renderGraded) renderGraded();
+  }
+});
+document.addEventListener('input', (ev) => {
+  if (ev.target.id !== 'gQuery' || !gForm) return;
+  gForm.q = ev.target.value;
+  const box = sheetPanel.querySelector('.gpicks');
+  const picks = gPickList(gForm.q);
+  if (box) box.innerHTML = picks.map((p) => `<button class="gpick" data-gpick="${esc(p.id)}"><span class="title-code">${esc(printCode(p.set))}</span>${esc(cardName(p))} <span class="note num">${esc(p.number)}</span></button>`).join('') || (fold(gForm.q).length >= 2 ? `<p class="note">${L.noResult}</p>` : '');
+});
+document.addEventListener('change', async (ev) => {
+  if (ev.target.id !== 'gPhotoFile' || !gForm) return;
+  const file = ev.target.files?.[0]; if (!file) return;
+  gFormRead();
+  try { gForm.photo = await gResize(file); renderGForm(); } catch { toast(L.gr.photoErr); }
+});
+document.addEventListener('submit', (ev) => {
+  if (ev.target.id !== 'gSaleForm' || !gOpen) return;
+  ev.preventDefault();
+  const e = user.graded.find((x) => x.g === gOpen.g); if (!e) return;
+  const d = document.getElementById('gSaleDate').value || new Date().toISOString().slice(0, 10);
+  const p = Math.round(Number(document.getElementById('gSalePrice').value) * 100) / 100;
+  if (!(p > 0)) { document.getElementById('gSalePrice').focus(); return; }
+  const k = gkey(e);
+  user.gsales[k] = [...(user.gsales[k] ?? []).filter(([dd, pp]) => !(dd === d && pp === p)), [d, p]];
+  gSave(); openSlab(e.g); toast(L.gr.saleAdded);
+  if (currentRender === renderGraded) renderGraded();
+});
+
+// ---------- Decks personnalisés (règles du format construit) ----------
+// 3 Légendes aux noms différents ; 40 à 50 cartes hors Légendes ; 3 exemplaires max d'une même carte (toutes éditions confondues) ;
+// RAM : chaque couleur part de 0 et chaque Légende ajoute sa RAM à sa couleur ; une carte ne peut pas demander plus de RAM
+// que la limite de sa couleur. Réserve (tournoi) : 7 cartes.
+const DECK = { min: 40, max: 50, copies: 3, legends: 3, side: 7 };
+const COLORS = ['Red', 'Blue', 'Yellow', 'Green'];
+const nameKey = (c) => c.nameEn ?? c.name;
+// une carte par nom (l'édition affichée : dans la langue des cartes, la série la plus ancienne)
+let printsByName = null;
+function deckPrints() {
+  if (printsByName) return printsByName;
+  printsByName = new Map();
+  const order = new Map(catalog.sets.map((s) => [s.code, s.order ?? 999]));
+  for (const c of catalog.cards) { const k = nameKey(c); if (!printsByName.has(k)) printsByName.set(k, []); printsByName.get(k).push(c); }
+  for (const list of printsByName.values()) list.sort((a, b) => (order.get(a.set) ?? 999) - (order.get(b.set) ?? 999) || String(a.number).localeCompare(String(b.number)));
+  return printsByName;
+}
+const canonOf = (c) => { const l = deckPrints().get(nameKey(c)) ?? [c]; return l.find(inCardLang) ?? l[0]; };
+const deckPool = () => [...deckPrints().values()].map((l) => l.find(inCardLang) ?? l[0]);
+// exemplaires possédés d'une carte (toutes éditions) : en FR + EN (par défaut), en FR seulement ou en EN seulement
+const deckOwnMode = () => (['fr', 'en'].includes(user.prefs.deckOwn) ? user.prefs.deckOwn : 'all');
+const qtyIn = (x, l) => (!x.languages || x.languages.includes(l) ? qty(x.id, l) : 0);
+const ownedByName = (c, mode = deckOwnMode()) => (deckPrints().get(nameKey(c)) ?? [c]).reduce((a, x) => a + (mode === 'all' ? qtyAll(x.id) : qtyIn(x, mode)), 0);
+const cheapest = (c) => { const ps = (deckPrints().get(nameKey(c)) ?? [c]).map((x) => price(x.id)).filter((v) => v != null); return ps.length ? Math.min(...ps) : null; };
+
+if (!Array.isArray(user.decks)) user.decks = [];
+if (!Array.isArray(user.decksGone)) user.decksGone = [];
+const deckById = (d) => user.decks.find((x) => x.d === d);
+const dSig = () => JSON.stringify([user.decks, user.decksGone]);
+let dLastSig = dSig();
+function dSave() {
+  try { localStorage.setItem(KEY, JSON.stringify(user)); } catch { /* */ }
+  const sig = dSig();
+  if (sig !== dLastSig) { dLastSig = sig; dCloudChanged(); }
+}
+const sumMap = (m) => Object.values(m ?? {}).reduce((a, n) => a + n, 0);
+
+function deckCheck(dk) {
+  const legs = dk.legends.map((id) => cardsById.get(id)).filter(Boolean);
+  const ram = Object.fromEntries(COLORS.map((k) => [k, 0]));
+  for (const l of legs) if (l.color in ram) ram[l.color] += l.ram ?? 0;
+  const count = sumMap(dk.main), sideCount = sumMap(dk.side);
+  const byName = new Map();
+  for (const m of [dk.main, dk.side]) for (const [id, n] of Object.entries(m)) { const c = cardsById.get(id); if (c) byName.set(nameKey(c), (byName.get(nameKey(c)) ?? 0) + n); }
+  const tooMany = [...byName].filter(([, n]) => n > DECK.copies).map(([k]) => k);
+  const overRam = Object.keys(dk.main).concat(Object.keys(dk.side)).map((id) => cardsById.get(id)).filter((c) => c && (c.ram ?? 0) > (ram[c.color] ?? 0));
+  const legNames = legs.map(nameKey);
+  const checks = [
+    { k: 'legends', ok: legs.length === DECK.legends && new Set(legNames).size === legs.length, label: L.dk.cLegends(legs.length), hint: new Set(legNames).size < legs.length ? L.dk.sameLegend : '' },
+    { k: 'size', ok: count >= DECK.min && count <= DECK.max, label: L.dk.cSize(count), hint: count < DECK.min ? L.dk.needMore(DECK.min - count) : count > DECK.max ? L.dk.tooMany(count - DECK.max) : '' },
+    { k: 'copies', ok: !tooMany.length, label: L.dk.cCopies, hint: tooMany.length ? tooMany.join(', ') : '' },
+    { k: 'ram', ok: !overRam.length, label: L.dk.cRam, hint: overRam.length ? L.dk.overRam(overRam.length) : '' },
+  ];
+  return { checks, valid: checks.every((c) => c.ok), ram, count, sideCount, overRam: new Set(overRam.map((c) => c.id)), tooMany: new Set(tooMany), byName };
+}
+const cardBlock = (c, ram, byName, mode) => {
+  if (c.type === 'Legend') return L.dk.isLegend;
+  if ((c.ram ?? 0) > (ram[c.color] ?? 0)) return L.dk.ramShort(c.ram, colorLabel(c.color));
+  if ((byName.get(nameKey(c)) ?? 0) >= DECK.copies) return L.dk.max3;
+  if (mode === 'side' && sumMap(deckUI.deck?.side) >= DECK.side) return L.dk.sideFull;
+  return '';
+};
+const colorDot = (c) => `<i class="cdot" style="--fc:${FACTION[c] ?? '#888'}" title="${esc(colorLabel(c))}"></i>`;
+
+// --- liste des decks ---
+function deckValue(dk) {
+  let v = 0, miss = 0, missCost = 0;
+  const need = new Map();
+  for (const m of [dk.main]) for (const [id, n] of Object.entries(m)) { const c = cardsById.get(id); if (c) need.set(nameKey(c), [(need.get(nameKey(c))?.[0] ?? 0) + n, c]); }
+  for (const id of dk.legends) { const c = cardsById.get(id); if (c) need.set(nameKey(c), [(need.get(nameKey(c))?.[0] ?? 0) + 1, c]); }
+  for (const [, [n, c]] of need) {
+    const p = cheapest(c) ?? 0; v += n * p;
+    const m = Math.max(0, n - ownedByName(c)); miss += m; missCost += m * p;
+  }
+  return { v, miss, missCost };
+}
+function renderDecks() {
+  setTopbar(`<h1>${L.dk.title}</h1>${langBtn()}<button class="chip" data-dact="new">+ ${L.dk.new}</button>`);
+  const list = [...user.decks].sort((a, b) => (b.upd ?? 0) - (a.upd ?? 0));
+  const tabsHtml = `<div class="chips deck-tabs">${[['mine', L.cd.mine], ['tourney', L.cd.tourney], ['community', L.cd.community]].map(([k, l]) => `<button class="chip" data-decktab="${k}" aria-pressed="${deckTab() === k}">${l}</button>`).join('')}</div>`;
+  if (deckTab() !== 'mine') {
+    view.innerHTML = `<div class="stack">${colTabs('decks')}${tabsHtml}<div id="communityBox" class="stack"><div class="empty"><strong>${L.fr.loading}</strong></div></div></div>`;
+    renderCommunityDecks(deckTab());
+    return;
+  }
+  view.innerHTML = `<div class="stack">
+    ${colTabs('decks')}
+    ${tabsHtml}
+    ${list.length ? `<div class="deck-list">${list.map((dk) => {
+      const ck = deckCheck(dk), val = deckValue(dk);
+      const legs = dk.legends.map((id) => cardsById.get(id));
+      return `<a class="deck-tile" href="#deck-${esc(dk.d)}">
+        <span class="deck-legs">${[0, 1, 2].map((i) => (legs[i] ? `<img src="${esc(imageOf(legs[i]) || placeholderArt(legs[i]))}" alt="" loading="lazy">` : '<span class="leg-empty"></span>')).join('')}</span>
+        <span class="deck-meta"><b>${esc(dk.name || L.dk.untitled)}</b>
+          <span class="note num">${COLORS.filter((k) => ck.ram[k]).map(colorDot).join('')} ${L.dk.cards(ck.count)}${ck.sideCount ? ` + ${ck.sideCount}` : ''} · ${eur(val.v)}</span>
+          <span class="dbadge ${ck.valid ? 'ok' : 'ko'}">${ck.valid ? `✓ ${L.dk.legal}` : `${ck.checks.filter((c) => !c.ok).length} ${L.dk.toFix}`}</span>
+          ${val.miss ? `<span class="note num">${L.dk.missing(val.miss, eur(val.missCost))}</span>` : `<span class="note">${L.dk.complete}</span>`}</span>
+      </a>`;
+    }).join('')}</div>` : `<div class="empty"><strong>${L.dk.empty}</strong>${L.dk.emptyHint}<button class="cta" data-dact="new">+ ${L.dk.new}</button></div>`}
+    <section class="panel"><h3>${L.sh.importTitle}</h3><div class="code-row"><input class="search num" id="deckCodeInput" maxlength="8" placeholder="${L.sh.codePh}" autocomplete="off" autocapitalize="characters"><button class="chip" data-sh="code">${L.sh.open}</button></div></section>
+    <details class="panel rules"><summary><h3>${L.dk.rulesTitle}</h3></summary><ul>${L.dk.rules.map((r) => `<li>${r}</li>`).join('')}</ul></details>
+  </div>`;
+}
+
+// --- construction d'un deck ---
+const deckUI = { deck: null, mode: 'main', q: '', type: '', color: '', owned: false, pick: null };
+function renderDeck(d) {
+  const dk = deckById(d);
+  if (!dk) { location.hash = '#decks'; return; }
+  if (deckUI.deck?.d !== d) { Object.assign(deckUI, { deck: dk, mode: 'main', q: '', type: '', color: '', owned: false, pick: deckUI.newDeck === d ? 0 : null, lq: '', confirmDel: false }); deckUI.newDeck = null; }
+  deckUI.deck = dk;
+  const ck = deckCheck(dk);
+  const legs = dk.legends.map((id) => cardsById.get(id));
+  setTopbar(`<a class="icon-btn" href="#decks" aria-label="${L.back}">${I.back}</a><h1 class="small">${esc(dk.name || L.dk.untitled)}</h1>
+    ${langBtn()}<button class="icon-btn" data-sh="share" aria-label="${L.sh.title}" title="${L.sh.title}">${I.share}</button><button class="icon-btn" data-dact="export" aria-label="${L.dk.export}" title="${L.dk.export}">${I.copy}</button>`);
+  const list = dk[deckUI.mode];
+  const rows = Object.entries(list).map(([id, n]) => [cardsById.get(id), n]).filter(([c]) => c)
+    .sort(([a], [b]) => ['Unit', 'Program', 'Gear'].indexOf(a.type) - ['Unit', 'Program', 'Gear'].indexOf(b.type) || (a.cost ?? 0) - (b.cost ?? 0) || cardName(a).localeCompare(cardName(b)));
+  const groups = new Map();
+  for (const r of rows) { const t = r[0].type; if (!groups.has(t)) groups.set(t, []); groups.get(t).push(r); }
+  const curve = Array(8).fill(0);
+  for (const [id, n] of Object.entries(dk.main)) { const c = cardsById.get(id); if (c) curve[Math.min(7, c.cost ?? 0)] += n; }
+  const cmax = Math.max(1, ...curve);
+  const val = deckValue(dk);
+  view.innerHTML = `<div class="stack deck-build">
+    <input class="search" id="deckName" value="${esc(dk.name)}" placeholder="${L.dk.namePh}" maxlength="60" autocomplete="off">
+    <section class="panel deck-status ${ck.valid ? 'is-ok' : ''}">
+      <h3>${ck.valid ? `✓ ${L.dk.legal}` : L.dk.notLegal}<small class="num">${eur(val.v)}</small></h3>
+      <div class="checks">${ck.checks.map((c) => `<div class="check ${c.ok ? 'ok' : 'ko'}"><b>${c.ok ? '✓' : '✗'}</b><span>${c.label}${c.hint ? `<small>${esc(c.hint)}</small>` : ''}</span></div>`).join('')}</div>
+      <div class="own-row"><span class="note">${L.dk.ownCount}</span><div class="seg">${[['all', 'FR + EN'], ['fr', 'FR'], ['en', 'EN']].map(([k, l]) => `<button data-deck-own="${k}" aria-pressed="${deckOwnMode() === k}">${l}</button>`).join('')}</div></div>
+      <div class="ram-row">${COLORS.map((k) => `<span class="ram-pill ${ck.ram[k] ? '' : 'zero'}" style="--fc:${FACTION[k]}">${esc(colorLabel(k))} <b class="num">${ck.ram[k]}</b></span>`).join('')}<small>${L.dk.ramLegend}</small></div>
+      ${val.miss ? `<p class="note num" style="margin:0">${L.dk.missing(val.miss, eur(val.missCost))}</p>` : (ck.count ? `<p class="note" style="margin:0">${L.dk.complete}</p>` : '')}
+    </section>
+    <h2 class="section-title">${L.dk.legends}</h2>
+    <div class="leg-slots">${[0, 1, 2].map((i) => legs[i]
+      ? `<div class="leg-slot"><button class="card-img" data-open="${esc(canonOf(legs[i]).id)}" aria-label="${esc(cardName(canonOf(legs[i])))}">${cardImg(canonOf(legs[i]))}</button><span class="leg-ram num" style="--fc:${FACTION[legs[i].color]}">${legs[i].ram ?? 0}</span><button class="leg-x" data-dleg-del="${i}" aria-label="${L.dk.removeLegend}">${I.x}</button></div>`
+      : `<button class="leg-slot empty ${deckUI.pick === i ? 'on' : ''}" data-dleg="${i}"><span>+</span>${L.dk.addLegend}</button>`).join('')}</div>
+    ${deckUI.pick != null ? legendPicker(dk) : ''}
+    <div class="seg">${[['main', `${L.dk.main} · ${ck.count}`], ['side', `${L.dk.side} · ${ck.sideCount}/${DECK.side}`]].map(([k, l]) => `<button data-dmode="${k}" aria-pressed="${deckUI.mode === k}">${l}</button>`).join('')}</div>
+    ${rows.length ? [...groups].map(([t, rs]) => `<h3 class="deck-group">${esc(typeLabel(t))} <small class="num">${rs.reduce((a, [, n]) => a + n, 0)}</small></h3>
+      <div class="rows">${rs.map(([c, n]) => deckRow(c, n, ck)).join('')}</div>`).join('') : `<p class="note">${deckUI.mode === 'side' ? L.dk.sideHint : L.dk.mainHint}</p>`}
+    ${deckUI.mode === 'main' && ck.count ? `<section class="panel"><h3>${L.dk.curve}</h3><div class="curve">${curve.map((n, i) => `<div class="cbar"><span class="num">${n || ''}</span><i style="height:${Math.round((n / cmax) * 100)}%"></i><b class="num">${i === 7 ? '7+' : i}</b></div>`).join('')}</div></section>` : ''}
+    <h2 class="section-title">${L.dk.addCards}</h2>
+    <input class="search" id="deckSearch" type="search" placeholder="${L.dk.searchPh}" value="${esc(deckUI.q)}" autocomplete="off">
+    <div class="chips">${[['', L.all], ['Unit', typeLabel('Unit')], ['Program', typeLabel('Program')], ['Gear', typeLabel('Gear')]].map(([k, l]) => `<button class="chip" data-dtype="${k}" aria-pressed="${deckUI.type === k}">${esc(l)}</button>`).join('')}
+      <button class="chip" data-downed aria-pressed="${deckUI.owned}">${L.dk.mine}</button></div>
+    <div class="chips">${[['', L.dk.allColors], ...COLORS.map((k) => [k, colorLabel(k)])].map(([k, l]) => `<button class="chip" data-dcolor="${k}" aria-pressed="${deckUI.color === k}">${k ? colorDot(k) : ''}${esc(l)}</button>`).join('')}</div>
+    <div id="deckResults">${deckResults(dk, ck)}</div>
+    ${val.miss ? `<a class="btn-ghost buy-entry" href="#buy-deck-${esc(dk.d)}">${I.cart}<span>${L.buy.deckBtn(val.miss)}</span></a>` : ''}
+    <button class="btn-ghost" data-dact="dup">${L.dk.duplicate}</button>
+    <button class="btn-ghost danger" data-dact="del">${deckUI.confirmDel ? L.dk.delSure : L.dk.del}</button>
+  </div>`;
+}
+function deckRow(c, n, ck) {
+  const bad = ck.overRam.has(c.id) || ck.tooMany.has(nameKey(c));
+  const own = ownedByName(c);
+  return `<div class="row deck-row ${bad ? 'bad' : ''}">
+    <button class="thumb" data-open="${esc(canonOf(c).id)}" aria-label="${esc(cardName(canonOf(c)))}">${cardImg(canonOf(c))}</button>
+    <div class="rmain"><b>${esc(cardName(canonOf(c)))}</b><span class="note num">${colorDot(c.color)}${c.cost != null ? `${L.cost} ${c.cost} · ` : ''}RAM ${c.ram ?? 0}${own < n ? ` · <span class="down">${L.dk.own(own, n)}</span>` : ''}${ck.overRam.has(c.id) ? ` · <span class="down">${L.dk.ramShort(c.ram, colorLabel(c.color))}</span>` : ''}</span></div>
+    <div class="stepper small"><button data-dk="-1" data-id="${esc(c.id)}" aria-label="${L.removeCopy}">−</button><output class="num">${n}</output><button data-dk="1" data-id="${esc(c.id)}" aria-label="${L.addCopy}">+</button></div>
+  </div>`;
+}
+function deckResults(dk, ck = deckCheck(dk)) {
+  const f = fold(deckUI.q.trim());
+  const res = deckPool().filter((c) => c.type !== 'Legend' && (!deckUI.type || c.type === deckUI.type) && (!deckUI.color || c.color === deckUI.color)
+    && (!deckUI.owned || ownedByName(c) > 0) && (!f || fold([c.name, c.nameEn, `${printCode(c.set)} ${c.number}`].join(' ')).includes(f)))
+    .sort((a, b) => (cardBlock(a, ck.ram, ck.byName) ? 1 : 0) - (cardBlock(b, ck.ram, ck.byName) ? 1 : 0) || (a.cost ?? 0) - (b.cost ?? 0) || cardName(a).localeCompare(cardName(b)));
+  if (!res.length) return `<div class="empty"><strong>${L.noResult}</strong></div>`;
+  return `<div class="cards deck-pool">${res.slice(0, 90).map((c) => {
+    const why = cardBlock(c, ck.ram, ck.byName, deckUI.mode);
+    const n = dk[deckUI.mode][c.id] ?? 0;
+    return `<div class="card pool-card ${why ? 'blocked' : ''}">
+      <button class="card-img" data-open="${esc(c.id)}" aria-label="${esc(cardName(c))}">${cardImg(c)}</button>
+      ${n ? `<span class="pool-n num">×${n}</span>` : ''}
+      <button class="pool-add" data-dk="1" data-id="${esc(c.id)}" ${why ? 'disabled' : ''} aria-label="${L.addCopy}">${why ? esc(why) : '+'}</button>
+    </div>`;
+  }).join('')}</div>${res.length > 90 ? `<p class="note">${L.dk.refine(res.length)}</p>` : ''}`;
+}
+function legendPicker(dk) {
+  const taken = new Set(dk.legends.map((id) => cardsById.get(id)).filter(Boolean).map(nameKey));
+  const f = fold(deckUI.lq ?? '');
+  const legs = deckPool().filter((c) => c.type === 'Legend' && !taken.has(nameKey(c)) && (!f || fold([c.name, c.nameEn].join(' ')).includes(f)))
+    .sort((a, b) => COLORS.indexOf(a.color) - COLORS.indexOf(b.color) || cardName(a).localeCompare(cardName(b)));
+  return `<section class="panel leg-picker"><h3>${L.dk.pickLegend}<button class="link-btn" data-dleg-cancel>${L.dk.cancel}</button></h3>
+    <input class="search" id="legSearch" type="search" placeholder="${L.dk.legSearch}" value="${esc(deckUI.lq ?? '')}" autocomplete="off">
+    <div class="cards">${legs.map((c) => `<div class="card"><button class="card-img" data-dleg-pick="${esc(c.id)}" aria-label="${esc(cardName(c))}">${cardImg(c)}</button><span class="note num leg-cap">${colorDot(c.color)}${esc(cardName(c).split(' — ')[0])}</span></div>`).join('')}</div>
+  </section>`;
+}
+function deckTouch(dk) { dk.upd = Date.now(); dSave(); }
+function deckExport(dk) {
+  const line = (id, n) => { const c = cardsById.get(id); return c ? `${n} ${cardName(c)} (${printCode(c.set)} ${c.number})` : ''; };
+  const ck = deckCheck(dk);
+  return [dk.name || L.dk.untitled, '', `${L.dk.legends} (${dk.legends.filter(Boolean).length})`, ...dk.legends.filter(Boolean).map((id) => line(id, 1)),
+    '', `${L.dk.main} (${ck.count})`, ...Object.entries(dk.main).map(([id, n]) => line(id, n)),
+    ...(ck.sideCount ? ['', `${L.dk.side} (${ck.sideCount})`, ...Object.entries(dk.side).map(([id, n]) => line(id, n))] : [])].filter((x, i, a) => x !== '' || a[i - 1] !== '').join('\n');
+}
+
+document.addEventListener('click', async (ev) => {
+  const t = ev.target.closest('[data-dact],[data-dk],[data-dleg],[data-dleg-del],[data-dleg-pick],[data-dleg-cancel],[data-dmode],[data-dtype],[data-dcolor],[data-downed]');
+  if (!t) return;
+  const d = t.dataset;
+  if (d.dact === 'new') {
+    const dk = { d: `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name: L.dk.defaultName(user.decks.length + 1), legends: [null, null, null], main: {}, side: {}, upd: Date.now() };
+    user.decks.push(dk); dSave(); deckUI.newDeck = dk.d; location.hash = `#deck-${dk.d}`; return;
+  }
+  const dk = deckUI.deck;
+  if (!dk || !deckById(dk.d)) return;
+  const rerender = () => renderDeck(dk.d);
+  if (d.dk) {
+    const c = cardsById.get(d.id); if (!c) return;
+    const m = dk[deckUI.mode];
+    const ck = deckCheck(dk);
+    if (Number(d.dk) > 0 && cardBlock(c, ck.ram, ck.byName, deckUI.mode)) { toast(cardBlock(c, ck.ram, ck.byName, deckUI.mode)); return; }
+    const n = Math.max(0, (m[d.id] ?? 0) + Number(d.dk));
+    if (n) m[d.id] = n; else delete m[d.id];
+    deckTouch(dk); rerender();
+  } else if (d.dleg !== undefined) { deckUI.pick = Number(d.dleg); deckUI.lq = ''; rerender(); document.querySelector('.leg-picker')?.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+  else if (d.dlegCancel !== undefined) { deckUI.pick = null; rerender(); }
+  else if (d.dlegPick) {
+    const slot = deckUI.pick ?? dk.legends.findIndex((x) => !x);
+    if (slot < 0) return;
+    dk.legends[slot] = d.dlegPick;
+    const next = dk.legends.findIndex((x) => !x);
+    deckUI.pick = next >= 0 ? next : null; deckUI.lq = '';
+    deckTouch(dk); rerender();
+  } else if (d.dlegDel !== undefined) { dk.legends[Number(d.dlegDel)] = null; deckTouch(dk); rerender(); }
+  else if (d.dmode) { deckUI.mode = d.dmode; rerender(); }
+  else if (d.dtype !== undefined) { deckUI.type = d.dtype; document.getElementById('deckResults').innerHTML = deckResults(dk); for (const b of document.querySelectorAll('[data-dtype]')) b.setAttribute('aria-pressed', b.dataset.dtype === d.dtype); }
+  else if (d.dcolor !== undefined) { deckUI.color = d.dcolor; document.getElementById('deckResults').innerHTML = deckResults(dk); for (const b of document.querySelectorAll('[data-dcolor]')) b.setAttribute('aria-pressed', b.dataset.dcolor === d.dcolor); }
+  else if (d.downed !== undefined) { deckUI.owned = !deckUI.owned; t.setAttribute('aria-pressed', deckUI.owned); document.getElementById('deckResults').innerHTML = deckResults(dk); }
+  else if (d.dact === 'export') {
+    const txt = deckExport(dk);
+    try { await navigator.clipboard.writeText(txt); toast(L.dk.copied); } catch { prompt(L.dk.export, txt); }
+  } else if (d.dact === 'dup') {
+    const copy = JSON.parse(JSON.stringify(dk));
+    copy.d = `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`; copy.name = `${dk.name} (2)`; copy.upd = Date.now();
+    user.decks.push(copy); dSave(); toast(L.dk.duplicated); location.hash = `#deck-${copy.d}`;
+  } else if (d.dact === 'del') {
+    if (!deckUI.confirmDel) { deckUI.confirmDel = true; rerender(); setTimeout(() => { deckUI.confirmDel = false; }, 4000); return; }
+    deckUI.confirmDel = false;
+    user.decks = user.decks.filter((x) => x.d !== dk.d); user.decksGone = [...new Set([...user.decksGone, dk.d])].slice(-200);
+    dSave(); toast(L.dk.deleted); location.hash = '#decks';
+  }
+});
+document.addEventListener('input', (ev) => {
+  const dk = deckUI.deck;
+  if (!dk) return;
+  if (ev.target.id === 'deckSearch') { deckUI.q = ev.target.value; document.getElementById('deckResults').innerHTML = deckResults(dk); }
+  else if (ev.target.id === 'deckName') { dk.name = ev.target.value.slice(0, 60); const h = topbar.querySelector('h1'); if (h) h.textContent = dk.name || L.dk.untitled; }
+  else if (ev.target.id === 'legSearch') {
+    deckUI.lq = ev.target.value;
+    const box = document.querySelector('.leg-picker'); if (!box) return;
+    const tmp = document.createElement('div'); tmp.innerHTML = legendPicker(dk);
+    box.querySelector('.cards').replaceWith(tmp.querySelector('.cards'));
+  }
+});
+document.addEventListener('change', (ev) => { if (ev.target.id === 'deckName' && deckUI.deck) deckTouch(deckUI.deck); });
+document.addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-deck-own]');
+  if (!b) return;
+  user.prefs.deckOwn = b.dataset.deckOwn; save();
+  const y = scrollY; currentRender(); scrollTo(0, y);
+  toast(L.dk.ownToast(b.textContent));
+});
+
+// --- synchro : document decks/<uid> ---
+const dRef = (uid = cloud.user.uid) => cloud.api.fsM.doc(cloud.api.db, COL.decks, uid);
+const dCloud = { unsub: null, timer: 0, dirty: false, denied: false };
+function dMerge(a, b) {
+  const gone = new Set([...(a?.gone ?? []), ...(b?.gone ?? [])]);
+  const m = new Map();
+  for (const dk of [...(a?.list ?? []), ...(b?.list ?? [])]) if (!gone.has(dk.d) && (!m.has(dk.d) || (dk.upd ?? 0) >= (m.get(dk.d).upd ?? 0))) m.set(dk.d, dk);
+  return { list: [...m.values()], gone: [...gone].slice(-200) };
+}
+function dApply(x) {
+  user.decks = x.list; user.decksGone = x.gone ?? [];
+  dLastSig = dSig();
+  try { localStorage.setItem(KEY, JSON.stringify(user)); } catch { /* */ }
+  if (currentRender === renderDecks) renderDecks();
+  else if (deckUI.deck && location.hash === `#deck-${deckUI.deck.d}` && !document.activeElement?.matches('input')) { deckUI.deck = deckById(deckUI.deck.d) ?? null; if (deckUI.deck) renderDeck(deckUI.deck.d); }
+}
+async function dPush() {
+  if (!cloud.user) return;
+  clearTimeout(dCloud.timer);
+  try { await cloud.api.fsM.setDoc(dRef(), { list: user.decks, gone: user.decksGone, updatedAt: cloud.api.fsM.serverTimestamp() }); dCloud.dirty = false; user.dPending = false; dCloud.denied = false; try { localStorage.setItem(KEY, JSON.stringify(user)); } catch { /* */ } }
+  catch (e) { if (e?.code === 'permission-denied' && !dCloud.denied) { dCloud.denied = true; toast(L.dk.rulesNeeded); } }
+}
+function dCloudChanged() {
+  if (!cloud.enabled) return;
+  user.dPending = true;
+  if (!cloud.user) return;
+  dCloud.dirty = true;
+  clearTimeout(dCloud.timer);
+  dCloud.timer = setTimeout(dPush, 1500);
+}
+function dOnUser(u) {
+  dCloud.unsub?.(); dCloud.unsub = null;
+  if (!u) return;
+  let first = true;
+  dCloud.unsub = cloud.api.fsM.onSnapshot(dRef(u.uid), async (snap) => {
+    if (snap.metadata.hasPendingWrites) return;
+    const remote = snap.exists() ? { list: snap.data().list ?? [], gone: snap.data().gone ?? [] } : null;
+    const local = { list: user.decks, gone: user.decksGone };
+    if (first) {
+      first = false;
+      const next = !remote ? local : (user.dSyncedUid !== u.uid || user.dPending) ? dMerge(remote, local) : remote;
+      user.dSyncedUid = u.uid;
+      dApply(next);
+      if (!remote || JSON.stringify(next) !== JSON.stringify(remote)) await dPush();
+      return;
+    }
+    if (dCloud.dirty || !remote) return;
+    dApply(remote);
+  }, (e) => { if (e?.code === 'permission-denied' && !dCloud.denied) { dCloud.denied = true; toast(L.dk.rulesNeeded); } });
+}
+
+
+// ---------- Vue 3D d'une carte : la tourner dans tous les sens, la retourner, reflet holographique ----------
+// Le dos dépend du type : les Légendes ont un dos différent des autres cartes (images dans data/config.json → cardBacks).
+// Tant qu'aucune photo de dos n'est fournie, un dos neutre WeissDex est affiché.
+let v3d = null;
+const v3 = { rx: 0, ry: 0, vx: 0, vy: 0, drag: null, raf: 0, lastTap: 0, idle: 0, spin: null };
+// cartes imprimées en foil (elles brillent de base) : seules elles ont l'effet holographique en 3D
+// reflet holographique en 3D : cartes holo et au-dessus
+const isFoilCard = (c) => !!c && !isSealed(c) && (rarityTier(c.rarity) >= 1 || !!P(c.id)?.foil);
+function cardBackFor(c) {
+  const backs = config.cardBacks ?? {};
+  if (!c || isSealed(c)) return null;
+  return (c.type === 'Legend' ? backs.legend : backs.normal) || null;
+}
+function v3dRender() {
+  const card = v3d.querySelector('.c3d');
+  card.style.transform = `rotateX(${v3.rx.toFixed(2)}deg) rotateY(${v3.ry.toFixed(2)}deg)`;
+  // reflet : suit l'angle de la carte (côté visible)
+  const ny = ((v3.ry % 360) + 540) % 360 - 180, nx = ((v3.rx % 360) + 540) % 360 - 180;
+  const face = Math.abs(ny) > 90 !== Math.abs(nx) > 90 ? 'back' : 'front';
+  const gx = 50 + Math.sin((ny * Math.PI) / 180) * 45, gy = 50 - Math.sin((nx * Math.PI) / 180) * 45;
+  const hx = 50 + ny * 0.9, hy = 50 + nx * 0.9;
+  for (const g of v3d.querySelectorAll('.c3d-glare')) { g.style.setProperty('--hx', `${hx}%`); g.style.setProperty('--hy', `${hy}%`); g.style.setProperty('--gx', `${gx}%`); g.style.setProperty('--gy', `${gy}%`); g.style.setProperty('--ga', String(Math.min(1, (Math.abs(Math.sin((ny * Math.PI) / 180)) + Math.abs(Math.sin((nx * Math.PI) / 180))) * 0.9 + 0.15))); }
+  v3d.dataset.face = face;
+}
+function v3dLoop() {
+  cancelAnimationFrame(v3.raf);
+  const step = () => {
+    if (v3d.hidden) return;
+    if (v3.spin) {                                   // animation (entrée, retournement) vers une cible
+      const t = Math.min(1, (performance.now() - v3.spin.t0) / v3.spin.ms), e = 1 - (1 - t) ** 3;
+      v3.rx = v3.spin.fx + (v3.spin.tx - v3.spin.fx) * e; v3.ry = v3.spin.fy + (v3.spin.ty - v3.spin.fy) * e;
+      if (t >= 1) v3.spin = null;
+    } else if (!v3.drag) {
+      if (Math.abs(v3.vx) + Math.abs(v3.vy) > 0.02) { v3.rx += v3.vx; v3.ry += v3.vy; v3.vx *= 0.95; v3.vy *= 0.95; v3.idle = performance.now(); }
+      else if (performance.now() - v3.idle > 2500) {   // au repos : léger flottement
+        const k = (performance.now() - v3.idle - 2500) / 1000;
+        v3.rx += (Math.sin(k * 0.9) * 6 - (v3.rx - Math.round(v3.rx / 180) * 180)) * 0.02;
+        v3.ry += (Math.sin(k * 0.6) * 10 - (v3.ry - Math.round(v3.ry / 180) * 180)) * 0.02;
+      }
+    }
+    v3dRender();
+    v3.raf = requestAnimationFrame(step);
+  };
+  v3.raf = requestAnimationFrame(step);
+}
+const v3dSpinTo = (tx, ty, ms = 650) => { v3.spin = { fx: v3.rx, fy: v3.ry, tx, ty, ms, t0: performance.now() }; v3.vx = 0; v3.vy = 0; v3.idle = performance.now(); };
+function v3dFlip() { v3dSpinTo(Math.round(v3.rx / 180) * 180, Math.round((v3.ry + 180) / 180) * 180); }
+function zoomOpen(src, alt, c) {
+  if (!v3d) {
+    v3d = document.createElement('div');
+    v3d.className = 'v3d'; v3d.hidden = true;
+    v3d.setAttribute('role', 'dialog'); v3d.setAttribute('aria-modal', 'true');
+    document.body.append(v3d);
+    v3d.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      v3d.setPointerCapture?.(e.pointerId);
+      v3.drag = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false };
+      v3.spin = null; v3.vx = 0; v3.vy = 0;
+    });
+    v3d.addEventListener('pointermove', (e) => {
+      if (!v3.drag) return;
+      const dx = e.clientX - v3.drag.x, dy = e.clientY - v3.drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 4) v3.drag.moved = true;
+      const k = 0.45;
+      v3.ry += dx * k; v3.rx -= dy * k;
+      const dt = Math.max(8, performance.now() - v3.drag.t);
+      v3.vy = (dx * k * 16) / dt; v3.vx = (-dy * k * 16) / dt;
+      Object.assign(v3.drag, { x: e.clientX, y: e.clientY, t: performance.now() });
+      v3.idle = performance.now();
+    });
+    const up = (e) => {
+      if (!v3.drag) return;
+      const tap = !v3.drag.moved;
+      v3.drag = null; v3.idle = performance.now();
+      if (!tap || e.type !== 'pointerup') return;
+      const now = Date.now();
+      if (now - v3.lastTap < 320) { v3.lastTap = 0; v3dFlip(); return; }   // double-touche : retourner
+      v3.lastTap = now;
+      if (!e.target.closest('.c3d')) setTimeout(() => { if (v3.lastTap === now) zoomClose(); }, 320);   // toucher à côté : fermer
+    };
+    for (const t of ['pointerup', 'pointercancel']) v3d.addEventListener(t, up);
+    v3d.addEventListener('click', (e) => { const b = e.target.closest('[data-v3d]'); if (!b) return; if (b.dataset.v3d === 'close') zoomClose(); else if (b.dataset.v3d === 'flip') v3dFlip(); else if (b.dataset.v3d === 'reset') v3dSpinTo(0, 0); });
+  }
+  const back = cardBackFor(c);
+  const sealedItem = c && isSealed(c);
+  const shiny = isFoilCard(c);
+  v3d.innerHTML = `<div class="v3d-stage">
+      <div class="c3d ${sealedItem ? 'is-sealed' : ''} ${c?.type === 'Legend' ? 'is-legend' : ''}" style="--rc:${c?.rarity ? rarityHex(c.rarity) : 'var(--accent)'}">
+        <div class="c3d-face c3d-front"><img src="${esc(src)}" alt="${esc(alt ?? '')}" draggable="false">${shiny ? '<span class="c3d-glare c3d-holo"></span><span class="c3d-glare c3d-sparkle"></span><span class="c3d-glare c3d-shine"></span>' : ''}</div>
+        <div class="c3d-face c3d-back">${back ? `<img src="${esc(back)}" alt="" draggable="false">` : `<span class="c3d-back-default"><b>WEISS<i>DEX</i></b><small>WS</small></span>`}</div>
+      </div>
+    </div>
+    <div class="v3d-bar">
+      <button class="chip" data-v3d="flip">${I.flip}<span>${L.v3d.flip}</span></button>
+      <button class="chip" data-v3d="reset">${L.v3d.reset}</button>
+    </div>
+    <p class="v3d-tip">${L.v3d.tip}</p>
+    <button class="icon-btn v3d-close" data-v3d="close" aria-label="${L.close}">${I.x}</button>`;
+  v3d.hidden = false;
+  Object.assign(v3, { rx: -12, ry: -200, vx: 0, vy: 0, drag: null, idle: performance.now() });
+  v3dSpinTo(0, 0, 900);                                   // entrée : la carte arrive en tournoyant
+  v3dLoop();
+  v3d.querySelector('.v3d-close').focus({ preventScroll: true });
+}
+function zoomClose() { if (v3d) { v3d.hidden = true; cancelAnimationFrame(v3.raf); } }
+const zoomEl = { get hidden() { return !v3d || v3d.hidden; } };
+document.addEventListener('click', (e) => {
+  const z = e.target.closest('[data-zoom]');
+  if (!z) return;
+  const img = z.querySelector('img.slab-photo[src]') ?? z.querySelector('img');
+  const c = openId ? cardsById.get(openId) : null;
+  if (z.dataset.hd) zoomOpen(z.dataset.hd, img?.alt, c);
+  else if (img?.src) zoomOpen(img.src, img.alt, z.closest('.gview-img') ? null : c);
+});
+
+// ---------- Actualités officielles (cyberpunktcg.com/blog), badge rouge = articles pas encore lus ----------
+let news = [];
+const NEWS_KEY = 'weissdex:newsRead';
+let newsRead = null;
+function newsInit() {
+  try { newsRead = new Set(JSON.parse(localStorage.getItem(NEWS_KEY) ?? 'null') ?? []); } catch { newsRead = null; }
+  if (!newsRead || !newsRead.size) {
+    // première fois : seuls les 3 articles les plus récents comptent comme nouveaux
+    newsRead = new Set(news.slice(3).map((n) => n.id));
+    newsSaveRead();
+  }
+  newsBadge();
+}
+function newsSaveRead() { try { localStorage.setItem(NEWS_KEY, JSON.stringify([...newsRead].slice(-300))); } catch { /* */ } }
+const newsUnread = () => (newsRead ? news.filter((n) => !newsRead.has(n.id)).length : 0);
+const newsBtn = () => `<a class="icon-btn news-btn" href="#news" aria-label="${L.news.title}">${I.mail}<b class="nbadge num" data-news-badge ${newsUnread() ? '' : 'hidden'}>${newsUnread() > 9 ? '9+' : newsUnread() || ''}</b></a>`;
+function newsBadge() {
+  const n = newsUnread();
+  for (const b of document.querySelectorAll('[data-news-badge]')) { b.hidden = !n; b.textContent = n > 9 ? '9+' : String(n || ''); }
+  const lbl = n ? `${L.news.title} · ${L.news.unread(n)}` : L.news.title;
+  for (const a of document.querySelectorAll('.news-btn')) a.setAttribute('aria-label', lbl);
+}
+// titres et résumés en français : traduits à l'avance dans news.json ; les nouveaux articles pas encore traduits
+// le sont sur l'appareil par Gemini (même service que Capri), une seule fois, puis gardés en mémoire
+const NEWS_FR_KEY = 'weissdex:newsFr';
+let newsFr = (() => { try { return JSON.parse(localStorage.getItem(NEWS_FR_KEY) ?? '{}') ?? {}; } catch { return {}; } })();
+let newsFrBusy = false;
+const newsTitle = (n) => (lang === 'fr' ? n.titleFr ?? newsFr[n.id]?.t ?? n.title : n.title);
+const newsExcerpt = (n) => (lang === 'fr' ? n.excerptFr ?? newsFr[n.id]?.e ?? n.excerpt : n.excerpt);
+async function newsTranslate() {
+  if (lang !== 'fr' || newsFrBusy || !cloud.api?.app) return;
+  const todo = news.filter((n) => !n.titleFr && !newsFr[n.id]).slice(0, 12);
+  if (!todo.length) return;
+  newsFrBusy = true;
+  try {
+    if (!capri.aiM) { capri.aiM = await import(`${FIREBASE}/firebase-ai.js`); capri.ai = capri.aiM.getAI(cloud.api.app, { backend: new capri.aiM.GoogleAIBackend() }); }
+    const models = cloud.cfg?.capriModels?.length ? cloud.cfg.capriModels : CAPRI_MODELS_DEFAULT;
+    const prompt = `Traduis en français naturel ces titres et résumés d'articles sur le jeu de cartes Cyberpunk TCG. Garde tels quels les noms propres, noms de séries, de cartes et d'événements (Welcome to Night City, Night City Brawl, Edgerunner Open, Pre-release peut devenir « avant-première »). Réponds uniquement en JSON : [{"id":"…","t":"titre","e":"résumé"}].\n${JSON.stringify(todo.map((n) => ({ id: n.id, t: n.title, e: n.excerpt })))}`;
+    for (const name of models) {
+      try {
+        const model = capri.aiM.getGenerativeModel(capri.ai, { model: name, generationConfig: { responseMimeType: 'application/json', temperature: 0.2, maxOutputTokens: 4000 } });
+        const res = await model.generateContent(prompt);
+        const out = JSON.parse(res.response.text());
+        for (const x of Array.isArray(out) ? out : []) if (x?.id && x.t && todo.some((n) => n.id === x.id)) newsFr[x.id] = { t: String(x.t).slice(0, 300), e: String(x.e ?? '').slice(0, 800) };
+        try { localStorage.setItem(NEWS_FR_KEY, JSON.stringify(newsFr)); } catch { /* */ }
+        break;
+      } catch { /* modèle suivant */ }
+    }
+  } catch { /* traduction indisponible : on garde l'anglais */ }
+  newsFrBusy = false;
+  if (currentRender === renderNews) renderNews(true);
+}
+function renderNews(fromTranslate) {
+  setTopbar(`<a class="icon-btn" href="#home" aria-label="${L.back}">${I.back}</a><h1 class="small">${L.news.title}</h1>`);
+  const unread = new Set(news.filter((n) => !newsRead?.has(n.id)).map((n) => n.id));
+  view.innerHTML = `<div class="stack">
+    <p class="note" style="margin:0">${L.news.intro}</p>
+    ${news.length ? `<div class="news-list">${news.map((n) => `<a class="news-card ${unread.has(n.id) ? 'unread' : ''}" href="${esc(n.url)}" target="_blank" rel="noopener">
+      ${n.image ? `<span class="news-img"><img src="${esc(n.image)}?w=640&fm=webp&q=70" alt="" loading="lazy" decoding="async"></span>` : ''}
+      <span class="news-body">
+        <span class="news-meta num">${unread.has(n.id) ? `<b class="news-new">${L.news.new}</b>` : ''}${n.date ? esc(fmt.date.format(parseDay(n.date))) : ''}</span>
+        <strong>${esc(newsTitle(n))}</strong>
+        ${newsExcerpt(n) ? `<span class="news-ex">${esc(newsExcerpt(n))}</span>` : ''}
+        <span class="news-link">${L.news.read} ${I.ext}</span>
+      </span></a>`).join('')}</div>` : `<div class="empty"><strong>${L.news.empty}</strong></div>`}
+  </div>`;
+  if (!fromTranslate) newsTranslate();
+  // tout est lu une fois la page ouverte (le badge disparaît, les « nouveau » restent affichés jusqu'à la prochaine visite)
+  if (newsRead && unread.size) { for (const id of unread) newsRead.add(id); newsSaveRead(); newsBadge(); }
+}
+
+
+// état / foil d'un exemplaire (fiche de carte)
+document.addEventListener('change', (e) => {
+  const sel = e.target.closest('[data-copy-cond]');
+  if (!sel || !openId) return;
+  const list = copiesOf(openId); list[Number(sel.dataset.copyCond)].c = sel.value;
+  setCopies(openId, list); gSave();
+});
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-copy-foil]');
+  if (!b || !openId) return;
+  const id = openId, list = copiesOf(id), i = Number(b.dataset.copyFoil);
+  list[i].f = list[i].f ? 0 : 1;
+  setCopies(id, list); gSave(); refreshCard(id); openCard(id, true);
+  if (currentRender === renderCollection || currentRender === renderValues) currentRender();
+});
+
+// ---------- Liste d'achat Cardmarket : cartes manquantes (souhaits, série, deck), filtres, export « Wants » ----------
+// Cardmarket choisit ensuite lui-même le ou les vendeurs qui ont le plus de cartes de la liste (Assistant d'achat / Shopping Wizard).
+const COND_ID = { MT: 1, NM: 2, EX: 3, GD: 4, LP: 5, PL: 6, PO: 7 };
+const buyUI = { src: '', target: 1, lang: null, cond: 'NM', max: '', rar: new Set(), foil: false, skip: new Set() };
+function buySource(src) {
+  const l = buyUI.lang;
+  const inL = (c) => !c.languages || c.languages.includes(l);
+  const printIn = (c) => (inL(c) ? c : (deckPrints().get(nameKey(c)) ?? []).find(inL) ?? c);
+  if (src.startsWith('wishl-')) {
+    const wl = wlById(src.slice(6));
+    return { title: wl ? wl.name : L.wishlist, lines: wlCards(wl).map((id) => cardsById.get(id)).filter((c) => c && !isSealed(c)).map((c) => [printIn(c), Math.max(0, 1 - qty(c.id, l))]) };
+  }
+  if (src === 'wish') {
+    return { title: L.wishlist, lines: [...wish].map((id) => cardsById.get(id)).filter((c) => c && !isSealed(c)).map((c) => [printIn(c), Math.max(0, 1 - qty(c.id, l))]) };
+  }
+  if (src.startsWith('set-')) {
+    const code = src.slice(4), s = setOf(code);
+    return { title: s ? `${s.print ?? s.code} · ${setName(s)}` : code, perSet: true, lines: (cardsBySet.get(code) ?? []).filter(inL).map((c) => [c, Math.max(0, buyUI.target - qty(c.id, l))]) };
+  }
+  if (src.startsWith('deck-')) {
+    const dk = deckById(src.slice(5));
+    if (!dk) return { title: '?', lines: [] };
+    const need = new Map();
+    const add = (id, n) => { const c = cardsById.get(id); if (!c) return; const k = nameKey(c); need.set(k, [(need.get(k)?.[0] ?? 0) + n, c]); };
+    for (const id of dk.legends) if (id) add(id, 1);
+    for (const [id, n] of Object.entries(dk.main)) add(id, n);
+    return { title: dk.name || L.dk.untitled, lines: [...need.values()].map(([n, c]) => [printIn(c), Math.max(0, n - ownedByName(c))]) };
+  }
+  return { title: '', lines: [] };
+}
+function buyLines() {
+  const src = buySource(buyUI.src);
+  const max = buyUI.max === '' ? null : Number(buyUI.max);
+  const lines = src.lines.filter(([c, n]) => n > 0 && (!buyUI.rar.size || buyUI.rar.has(c.rarity)) && (max == null || (price(c.id) != null && price(c.id) <= max)))
+    .sort(([a], [b]) => (price(b.id) ?? -1) - (price(a.id) ?? -1));
+  return { ...src, lines, all: src.lines.filter(([, n]) => n > 0) };
+}
+function cmProductUrl(c) {
+  const { gameSlug = 'WeissSchwarz', languageIds = { en: 1, fr: 2, ja: 7 } } = config.cardmarket ?? {};
+  const q = `language=${languageIds[buyUI.lang] ?? 1}&minCondition=${COND_ID[buyUI.cond] ?? 2}${buyUI.foil ? '&isFoil=Y' : ''}`;
+  return c.cardmarket?.path ? `https://www.cardmarket.com/${lang}/${gameSlug}/${c.cardmarket.path}?${q}` : `https://www.cardmarket.com/${lang}/${gameSlug}/Products/Search?searchString=${encodeURIComponent(c.nameEn ?? c.name)}`;
+}
+function renderBuy(src) {
+  if (buyUI.src !== src) Object.assign(buyUI, { src, target: 1, lang: cardLang, cond: 'NM', max: '', rar: new Set(), foil: false, skip: new Set() });
+  const data = buyLines();
+  const kept = data.lines.filter(([c]) => !buyUI.skip.has(c.id));
+  const total = kept.reduce((a, [c, n]) => a + n * (price(c.id) ?? 0), 0);
+  const count = kept.reduce((a, [, n]) => a + n, 0);
+  const rars = [...new Set(data.all.map(([c]) => c.rarity))].sort((a, b) => RARITIES.indexOf(a) - RARITIES.indexOf(b));
+  const back = src.startsWith('wish') ? '#wishlist' : src.startsWith('set-') ? `#${src}` : `#${src}`;
+  setTopbar(`<a class="icon-btn" href="${back}" aria-label="${L.back}">${I.back}</a><h1 class="small">${L.buy.title}</h1>`);
+  view.innerHTML = `<div class="stack buy">
+    <p class="note" style="margin:0"><b>${esc(data.title)}</b> · ${L.buy.from[src.startsWith('wishl-') ? 'wish' : src.split('-')[0]] ?? ''}</p>
+    <section class="panel">
+      <h3>${L.buy.filters}</h3>
+      ${data.perSet ? `<div class="seg">${[[1, L.buy.one], [3, L.buy.playset]].map(([k, l]) => `<button data-buy-target="${k}" aria-pressed="${buyUI.target === k}">${l}</button>`).join('')}</div>` : ''}
+      <div class="field-row">
+        <label class="field"><span>${L.buy.lang}</span><select id="buyLang"><option value="en" ${buyUI.lang === 'en' ? 'selected' : ''}>English</option><option value="ja" ${buyUI.lang === 'ja' ? 'selected' : ''}>日本語</option></select></label>
+        <label class="field"><span>${L.buy.cond}</span><select id="buyCond">${CONDS.map((k) => `<option value="${k}" ${buyUI.cond === k ? 'selected' : ''}>${esc(L.cp.conds[k])}</option>`).join('')}</select></label>
+      </div>
+      <div class="field-row">
+        <label class="field"><span>${L.buy.max}</span><input id="buyMax" type="number" inputmode="decimal" min="0" step="0.5" value="${esc(buyUI.max)}" placeholder="${L.buy.noMax}"></label>
+        <label class="field"><span>${L.buy.version}</span><select id="buyFoil"><option value="0">${L.buy.normal}</option><option value="1" ${buyUI.foil ? 'selected' : ''}>Foil</option></select></label>
+      </div>
+      ${rars.length > 1 ? `<div class="chips wrap">${rars.map((r) => `<button class="chip" data-buy-rar="${esc(r)}" aria-pressed="${buyUI.rar.has(r)}" ${rarityStyle(r)}>${esc(rarityLabel(r))}</button>`).join('')}</div>` : ''}
+    </section>
+    <div class="hero-value"><small>${L.buy.estimate}</small><strong class="num">${eur(total)}</strong><span class="note">${L.buy.summary(count, kept.length)}</span></div>
+    ${data.lines.length ? `<div class="rows">${data.lines.map(([c, n]) => `<div class="row buy-row ${buyUI.skip.has(c.id) ? 'off' : ''}">
+        <button class="thumb" data-open="${esc(c.id)}" aria-label="${esc(cardName(c))}">${cardImg(c)}</button>
+        <div class="rmain"><b>${n}× ${esc(cardName(c))}</b><span class="note num">${esc(printCode(c.set))} · ${esc(c.number)} · ${esc(rarityLabel(c.rarity))} · ${price(c.id) != null ? eur(price(c.id)) : L.noPrice}</span>
+          <a class="buy-link" href="${esc(cmProductUrl(c))}" target="_blank" rel="noopener">${L.buy.offers} ${I.ext}</a></div>
+        <button class="chip" data-buy-skip="${esc(c.id)}" aria-pressed="${!buyUI.skip.has(c.id)}">${buyUI.skip.has(c.id) ? L.buy.add : '✓'}</button>
+      </div>`).join('')}</div>` : `<div class="empty"><strong>${data.all.length ? L.buy.noneFiltered : L.buy.none}</strong></div>`}
+    ${kept.length ? `<button class="cta" data-buy-act="copy">${L.buy.copy}</button>
+    <a class="btn-ghost" style="text-align:center;text-decoration:none" href="https://www.cardmarket.com/${lang}/${esc(config.cardmarket?.gameSlug ?? 'WeissSchwarz')}/Wants" target="_blank" rel="noopener">${L.buy.openWants} ${I.ext}</a>
+    <section class="panel"><h3>${L.buy.howTitle}</h3><ol class="buy-how">${L.buy.how.map((x) => `<li>${x}</li>`).join('')}</ol></section>` : ''}
+  </div>`;
+}
+function buyText() {
+  return buyLines().lines.filter(([c]) => !buyUI.skip.has(c.id)).map(([c, n]) => `${n} ${c.nameEn ?? c.name}`).join('\n');
+}
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-buy-target],[data-buy-rar],[data-buy-skip],[data-buy-act]');
+  if (!t || !buyUI.src) return;
+  const d = t.dataset;
+  if (d.buyTarget) buyUI.target = Number(d.buyTarget);
+  else if (d.buyRar) buyUI.rar.has(d.buyRar) ? buyUI.rar.delete(d.buyRar) : buyUI.rar.add(d.buyRar);
+  else if (d.buySkip) buyUI.skip.has(d.buySkip) ? buyUI.skip.delete(d.buySkip) : buyUI.skip.add(d.buySkip);
+  else if (d.buyAct === 'copy') {
+    const txt = buyText();
+    try { await navigator.clipboard.writeText(txt); toast(L.buy.copied); } catch { prompt(L.buy.copy, txt); }
+    return;
+  }
+  const y = scrollY; renderBuy(buyUI.src); scrollTo(0, y);
+});
+document.addEventListener('change', (e) => {
+  if (!buyUI.src || !['buyLang', 'buyCond', 'buyMax', 'buyFoil'].includes(e.target.id)) return;
+  const v = e.target.value;
+  if (e.target.id === 'buyLang') buyUI.lang = v;
+  else if (e.target.id === 'buyCond') buyUI.cond = v;
+  else if (e.target.id === 'buyMax') buyUI.max = v;
+  else buyUI.foil = v === '1';
+  // rendu différé : l'événement peut arriver pendant que le champ perd le focus
+  clearTimeout(buyUI.timer);
+  buyUI.timer = setTimeout(() => { if (currentRender && location.hash === `#buy-${buyUI.src}`) { const y = scrollY; renderBuy(buyUI.src); scrollTo(0, y); } }, 0);
+});
+
+// ---------- Partage de decks : avec un code (sharedDecks/<CODE>) ou en regardant les decks d'un ami ----------
+const SHARE_ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const newShareCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => SHARE_ABC[b % SHARE_ABC.length]).join('');
+const shareRef = (code) => cloud.api.fsM.doc(cloud.api.db, COL.sharedDecks, code);
+const deckPayload = (dk) => ({ name: String(dk.name || L.dk.untitled).slice(0, 60), legends: dk.legends.map((x) => x ?? null), main: dk.main, side: dk.side ?? {} });
+const shareUrl = (code) => `${location.origin}${location.pathname}#deckcode-${code}`;
+async function deckShare(dk) {
+  if (!cloud.user) { toast(L.sh.signIn); openAccount(); return; }
+  const { fsM } = cloud.api;
+  try {
+    let code = dk.share;
+    if (code) {
+      const snap = await fsM.getDoc(shareRef(code)).catch(() => null);
+      if (!snap?.exists() || snap.data().uid !== cloud.user.uid) code = null;
+    }
+    if (!code) {
+      for (let i = 0; i < 5 && !code; i++) { const c = newShareCode(); const snap = await fsM.getDoc(shareRef(c)); if (!snap.exists()) code = c; }
+      if (!code) throw new Error('code');
+    }
+    await fsM.setDoc(shareRef(code), { ...deckPayload(dk), by: fr.me?.pseudo ?? '', uid: cloud.user.uid, at: fsM.serverTimestamp(), v: 1 });
+    dk.share = code; deckTouch(dk);
+    openShareSheet(dk);
+  } catch (e) { toast(e?.code === 'permission-denied' ? L.sh.rulesNeeded : L.sh.error); }
+}
+function openShareSheet(dk) {
+  openId = null; sheetMode = 'share';
+  sheetPanel.innerHTML = `${sheetTop()}<div class="stack share-sheet">
+    <h2 id="sheetTitle" style="margin:0;font:700 22px var(--font-display)">${L.sh.title}</h2>
+    <p class="note" style="margin:0">${L.sh.hint(esc(dk.name || L.dk.untitled))}</p>
+    <div class="share-code num" id="shareCode">${esc(dk.share)}</div>
+    <div class="field-row">
+      <button class="cta" data-sh="copy">${L.sh.copy}</button>
+      <button class="btn-ghost" data-sh="send">${L.sh.send}</button>
+    </div>
+    <p class="note" style="margin:0">${L.sh.update}</p>
+    <button class="btn-ghost danger" data-sh="stop">${L.sh.stop}</button>
+  </div>`;
+  sheet.hidden = false; document.body.style.overflow = 'hidden';
+}
+async function deckUnshare(dk) {
+  try { await cloud.api.fsM.deleteDoc(shareRef(dk.share)); } catch { /* déjà supprimé */ }
+  delete dk.share; deckTouch(dk); closeCard(); toast(L.sh.stopped);
+}
+// aperçu d'un deck qui n'est pas à moi (code ou ami), avec copie dans mes decks
+let previewDeck = null;
+function renderDeckPreview() {
+  const pv = previewDeck;
+  setTopbar(`<a class="icon-btn" href="${esc(pv.back)}" aria-label="${L.back}">${I.back}</a><h1 class="small">${esc(pv.deck.name || L.dk.untitled)}</h1>`);
+  const dk = { ...pv.deck, legends: pv.deck.legends ?? [], main: pv.deck.main ?? {}, side: pv.deck.side ?? {} };
+  const ck = deckCheck(dk);
+  const legs = dk.legends.map((id) => cardsById.get(id)).filter(Boolean);
+  const rows = Object.entries(dk.main).map(([id, n]) => [cardsById.get(id), n]).filter(([c]) => c)
+    .sort(([a], [b]) => ['Unit', 'Program', 'Gear'].indexOf(a.type) - ['Unit', 'Program', 'Gear'].indexOf(b.type) || (a.cost ?? 0) - (b.cost ?? 0));
+  const val = deckValue(dk);
+  view.innerHTML = `<div class="stack">
+    <p class="note" style="margin:0">${pv.by ? L.sh.by(esc(pv.by)) : ''}${pv.code ? ` · ${L.sh.codeLabel} <b class="num">${esc(pv.code)}</b>` : ''}</p>
+    <section class="panel deck-status ${ck.valid ? 'is-ok' : ''}"><h3>${ck.valid ? `✓ ${L.dk.legal}` : L.dk.notLegal}<small class="num">${eur(val.v)}</small></h3>
+      <p class="note num" style="margin:0">${L.dk.cards(ck.count)}${ck.sideCount ? ` + ${ck.sideCount} ${L.dk.side.toLowerCase()}` : ''} · ${val.miss ? L.dk.missing(val.miss, eur(val.missCost)) : L.dk.complete}</p></section>
+    <div class="leg-slots">${legs.map((c) => `<div class="leg-slot"><button class="card-img" data-open="${esc(c.id)}">${cardImg(c)}</button></div>`).join('')}</div>
+    <div class="rows">${rows.map(([c, n]) => `<div class="row deck-row"><button class="thumb" data-open="${esc(c.id)}">${cardImg(c)}</button><div class="rmain"><b>${n}× ${esc(cardName(c))}</b><span class="note num">${colorDot(c.color)}${esc(typeLabel(c.type))}${c.cost != null ? ` · ${L.cost} ${c.cost}` : ''}${ownedByName(c) < n ? ` · <span class="down">${L.dk.own(ownedByName(c), n)}</span>` : ''}</span></div><span></span></div>`).join('')}</div>
+    <button class="cta" data-sh="import">${L.sh.import}</button>
+    ${pv.url ? `<a class="btn-ghost" style="text-align:center;text-decoration:none" href="${esc(pv.url)}" target="_blank" rel="noopener">${L.cd.official} ${I.ext}</a>` : ''}
+  </div>`;
+}
+async function openDeckCode(raw) {
+  const code = String(raw ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  setTopbar(`<a class="icon-btn" href="#decks" aria-label="${L.back}">${I.back}</a><h1 class="small">${L.sh.importTitle}</h1>`);
+  if (code.length !== 6) { view.innerHTML = `<div class="empty"><strong>${L.sh.badCode}</strong></div>`; return; }
+  if (!cloud.user) { view.innerHTML = `<div class="empty"><strong>${L.sh.signIn}</strong><button class="btn-ghost" data-action="account">${L.account}</button></div>`; return; }
+  view.innerHTML = `<div class="empty"><strong>${L.fr.loading}</strong></div>`;
+  try {
+    const snap = await cloud.api.fsM.getDoc(shareRef(code));
+    if (!snap.exists()) { view.innerHTML = `<div class="empty"><strong>${L.sh.notFound(code)}</strong></div>`; return; }
+    const d = snap.data();
+    previewDeck = { deck: { name: d.name, legends: d.legends, main: d.main, side: d.side }, by: d.by ? `@${d.by}` : '', code, back: '#decks' };
+    if (location.hash === `#deckcode-${code}`) renderDeckPreview();
+  } catch (e) { view.innerHTML = `<div class="empty"><strong>${e?.code === 'permission-denied' ? L.sh.rulesNeeded : L.sh.error}</strong></div>`; }
+}
+function importPreview() {
+  const pv = previewDeck; if (!pv) return;
+  const d = `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  const legends = [0, 1, 2].map((i) => pv.deck.legends?.[i] ?? null);
+  user.decks.push({ d, name: `${pv.deck.name || L.dk.untitled}${pv.by ? ` (${pv.by})` : ''}`.slice(0, 60), legends, main: { ...(pv.deck.main ?? {}) }, side: { ...(pv.deck.side ?? {}) }, upd: Date.now() });
+  dSave(); toast(L.sh.imported); location.hash = `#deck-${d}`;
+}
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-sh],[data-frdeck]');
+  if (!t) return;
+  if (t.dataset.frdeck) {
+    const dk = fr.view?.decks?.find((x) => x.d === t.dataset.frdeck);
+    if (!dk) return;
+    previewDeck = { deck: dk, by: `@${fr.view.pseudo}`, code: '', back: `#friend-${fr.view.uid}` };
+    location.hash = '#deckview';
+    return;
+  }
+  const a = t.dataset.sh;
+  const dk = deckUI.deck && deckById(deckUI.deck.d);
+  if (a === 'share' && dk) deckShare(dk);
+  else if (a === 'copy' && dk?.share) { try { await navigator.clipboard.writeText(dk.share); toast(L.sh.copied); } catch { prompt(L.sh.title, dk.share); } }
+  else if (a === 'send' && dk?.share) {
+    const text = L.sh.message(dk.name || L.dk.untitled, dk.share);
+    if (navigator.share) navigator.share({ title: 'WeissDex', text, url: shareUrl(dk.share) }).catch(() => {});
+    else { try { await navigator.clipboard.writeText(`${text}\n${shareUrl(dk.share)}`); toast(L.sh.copied); } catch { prompt(L.sh.title, shareUrl(dk.share)); } }
+  } else if (a === 'stop' && dk?.share) deckUnshare(dk);
+  else if (a === 'import') importPreview();
+  else if (a === 'code') { const v = document.getElementById('deckCodeInput')?.value ?? ''; location.hash = `#deckcode-${v.toUpperCase().replace(/[^A-Z0-9]/g, '')}`; }
+});
+document.addEventListener('keydown', (e) => { if (e.target.id === 'deckCodeInput' && e.key === 'Enter') { e.preventDefault(); location.hash = `#deckcode-${e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '')}`; } });
+
+// ---------- Alertes prix sur les souhaits + notifications sur le téléphone ----------
+// alerts[id] = prix cible. Vérifié à chaque ouverture de l'appli, et en arrière-plan par le service worker
+// (synchronisation périodique, appli installée sur Android) : notification quand le prix tendance passe sous la cible.
+if (!user.alerts || typeof user.alerts !== 'object') user.alerts = {};
+const ALERT_SEEN = 'weissdex:alertSeen';
+let alertSeen = (() => { try { return JSON.parse(localStorage.getItem(ALERT_SEEN) ?? '{}') ?? {}; } catch { return {}; } })();
+const alertHit = (id) => user.alerts[id] != null && price(id) != null && price(id) <= user.alerts[id];
+const alertsTriggered = () => Object.keys(user.alerts).filter((id) => cardsById.has(id) && alertHit(id));
+const alertsUnread = () => alertsTriggered().filter((id) => alertSeen[id] !== `${priceFile.updatedAt}|${user.alerts[id]}`);
+// copie pour le service worker (il ne lit pas le localStorage)
+function swDb() {
+  return new Promise((res, rej) => { const r = indexedDB.open('weissdex-sw', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+}
+async function swPut(key, val) { try { const db = await swDb(); await new Promise((res, rej) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(val, key); t.oncomplete = res; t.onerror = () => rej(t.error); }); } catch { /* */ } }
+function alertsMirror() {
+  const out = {};
+  for (const [id, t] of Object.entries(user.alerts)) { const c = cardsById.get(id); if (c) out[id] = { t, n: cardName(c) }; }
+  swPut('alerts', out); swPut('lang', lang); swPut('seen', alertSeen);
+}
+function alertsBadge() {
+  const n = alertsUnread().length;
+  for (const a of document.querySelectorAll('.tabbar a[data-tab="wishlist"]')) {
+    let b = a.querySelector('.abadge');
+    if (!b) { b = document.createElement('b'); b.className = 'abadge num'; a.append(b); }
+    b.hidden = !n; b.textContent = n > 9 ? '9+' : String(n || '');
+  }
+}
+async function alertsNotify(ids) {
+  if (!ids.length || !('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const reg = await navigator.serviceWorker?.ready;
+    for (const id of ids.slice(0, 5)) {
+      const c = cardsById.get(id);
+      const title = L.al.notifTitle(cardName(c), eur(price(id)));
+      const opts = { body: L.al.notifBody(eur(user.alerts[id])), tag: `alert-${id}`, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', data: { url: './#wishlist' } };
+      if (reg?.showNotification) await reg.showNotification(title, opts); else new Notification(title, opts);
+    }
+  } catch { /* notifications indisponibles */ }
+}
+// à l'ouverture : nouvelles alertes déclenchées → notification + toast + badge
+function alertsCheck() {
+  alertsMirror();
+  const fresh = alertsUnread().filter((id) => !alertSeen[`n:${id}`] || alertSeen[`n:${id}`] !== `${priceFile.updatedAt}|${user.alerts[id]}`);
+  if (fresh.length) {
+    for (const id of fresh) alertSeen[`n:${id}`] = `${priceFile.updatedAt}|${user.alerts[id]}`;
+    try { localStorage.setItem(ALERT_SEEN, JSON.stringify(alertSeen)); } catch { /* */ }
+    swPut('seen', alertSeen);
+    alertsNotify(fresh);
+    toast(L.al.toast(fresh.length));
+  }
+  alertsBadge();
+}
+function alertsAck() {
+  for (const id of alertsTriggered()) alertSeen[id] = `${priceFile.updatedAt}|${user.alerts[id]}`;
+  try { localStorage.setItem(ALERT_SEEN, JSON.stringify(alertSeen)); } catch { /* */ }
+  swPut('seen', alertSeen);
+  alertsBadge();
+}
+const notifState = () => (!('Notification' in window) ? 'unsupported' : Notification.permission);
+async function alertsEnableNotifs() {
+  if (!('Notification' in window)) { toast(L.al.unsupported); return; }
+  const perm = await Notification.requestPermission();
+  if (perm === 'granted') {
+    try {
+      const reg = await navigator.serviceWorker?.ready;
+      if (reg?.periodicSync) {
+        const st = await navigator.permissions?.query({ name: 'periodic-background-sync' }).catch(() => null);
+        if (!st || st.state === 'granted') await reg.periodicSync.register('weissdex-alerts', { minInterval: 12 * 3600 * 1000 });
+      }
+    } catch { /* arrière-plan indisponible : vérification à l'ouverture seulement */ }
+    alertsMirror();
+    toast(L.al.enabled);
+  } else toast(L.al.denied);
+  if (currentRender === renderWishlist) renderWishlist();
+}
+function setAlert(id, v) {
+  const n = v === '' || v == null ? null : Math.round(Number(v) * 100) / 100;
+  if (n == null || !(n > 0)) delete user.alerts[id]; else user.alerts[id] = n;
+  delete alertSeen[id]; delete alertSeen[`n:${id}`];
+  try { localStorage.setItem(ALERT_SEEN, JSON.stringify(alertSeen)); } catch { /* */ }
+  gSave(); alertsMirror(); alertsBadge();
+}
+const alertLine = (id) => {
+  const c = cardsById.get(id), p = price(id);
+  if (!c || isSealed(c)) return '';
+  const t = user.alerts[id];
+  return `<div class="alert-line ${t != null && alertHit(id) ? 'hit' : ''}">
+    <span class="al-ico">${I.bell}</span>
+    <label for="alertInput">${L.al.label}</label>
+    <input id="alertInput" type="number" inputmode="decimal" min="0" step="0.1" value="${t ?? ''}" placeholder="${p != null ? (Math.floor(p * 0.9 * 10) / 10).toFixed(2) : '0,00'}" data-alert-id="${esc(id)}">
+    <span class="al-state">${t == null ? `<span class="muted">${L.al.off}</span>` : alertHit(id) ? `<b class="up">${L.al.hit}</b>` : L.al.waiting}</span>
+  </div>`;
+};
+document.addEventListener('change', (e) => {
+  const inp = e.target.closest('[data-alert-id]');
+  if (!inp) return;
+  const id = inp.dataset.alertId;
+  setAlert(id, inp.value);
+  if (user.alerts[id] != null && notifState() === 'default') toast(L.al.askNotif);
+  const box = inp.closest('.alert-line');
+  if (box) { const tmp = document.createElement('div'); tmp.innerHTML = alertLine(id); box.querySelector('.al-state').innerHTML = tmp.querySelector('.al-state').innerHTML; box.classList.toggle('hit', alertHit(id)); }
+  if (currentRender === renderWishlist && sheet.hidden) renderWishlist();
+});
+document.addEventListener('click', (e) => { if (e.target.closest('[data-action="notif-on"]')) alertsEnableNotifs(); });
+
+
+// ---------- Recadrage de la photo de profil (carré, affichée en rond) et de la bannière (3:1) ----------
+// Glisser pour déplacer, pincer / molette / curseur pour zoomer, puis Valider : l'image recadrée est vérifiée et publiée.
+const crop = { img: null, url: '', kind: 'avatar', z: 1, x: 0, y: 0, pts: new Map(), start: null };
+const CROP_OUT = { avatar: [160, 160], banner: [960, 320] };
+function openCropper(file, kind) {
+  if (crop.url) URL.revokeObjectURL(crop.url);
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    Object.assign(crop, { img, url, kind, z: 1, x: 0, y: 0, start: null }); crop.pts.clear();
+    openId = null; sheetMode = 'crop';
+    sheetPanel.innerHTML = `${sheetTop()}<div class="stack cropper">
+      <h2 id="sheetTitle" style="margin:0;font:700 22px var(--font-display)">${kind === 'banner' ? L.crop.titleBanner : L.crop.titleAvatar}</h2>
+      <div class="crop-stage ${kind}" id="cropStage"><img src="${esc(url)}" alt="" draggable="false"><span class="crop-mask"></span></div>
+      <label class="crop-zoom"><span>−</span><input type="range" id="cropZoom" min="1" max="4" step="0.01" value="1" aria-label="${L.crop.zoom}"><span>+</span></label>
+      <p class="note" style="margin:0">${L.crop.hint}</p>
+      <div class="field-row"><button class="btn-ghost" data-crop="cancel">${L.crop.cancel}</button><button class="cta" data-crop="ok">${L.crop.ok}</button></div>
+    </div>`;
+    sheet.hidden = false; document.body.style.overflow = 'hidden';
+    requestAnimationFrame(cropApply);
+  };
+  img.onerror = () => toast(L.avatarErr);
+  img.src = url;
+}
+// échelle de base : l'image couvre tout le cadre ; z = zoom en plus
+function cropGeom() {
+  const st = document.getElementById('cropStage');
+  const W = st.clientWidth, H = st.clientHeight;
+  const base = Math.max(W / crop.img.naturalWidth, H / crop.img.naturalHeight);
+  const s = base * crop.z, w = crop.img.naturalWidth * s, h = crop.img.naturalHeight * s;
+  return { st, W, H, s, w, h };
+}
+function cropApply() {
+  if (!crop.img || !document.getElementById('cropStage')) return;
+  const g = cropGeom();
+  // l'image doit toujours couvrir le cadre
+  crop.x = Math.min(0, Math.max(g.W - g.w, crop.x || (g.W - g.w) / 2));
+  crop.y = Math.min(0, Math.max(g.H - g.h, crop.y || (g.H - g.h) / 2));
+  const im = g.st.querySelector('img');
+  im.style.width = `${g.w}px`; im.style.height = `${g.h}px`; im.style.transform = `translate(${crop.x}px, ${crop.y}px)`;
+  const zr = document.getElementById('cropZoom'); if (zr && Number(zr.value) !== crop.z) zr.value = crop.z;
+}
+function cropZoomTo(z, cx, cy) {
+  const g = cropGeom();
+  const nz = Math.min(4, Math.max(1, z));
+  const px = cx ?? g.W / 2, py = cy ?? g.H / 2;
+  const r = nz / crop.z;
+  crop.x = px - (px - crop.x) * r; crop.y = py - (py - crop.y) * r; crop.z = nz;
+  if (crop.x === 0) crop.x = -0.0001; if (crop.y === 0) crop.y = -0.0001;
+  cropApply();
+}
+function cropExport() {
+  const g = cropGeom();
+  const [OW, OH] = CROP_OUT[crop.kind];
+  const c = document.createElement('canvas'); c.width = OW; c.height = OH;
+  c.getContext('2d').drawImage(crop.img, -crop.x / g.s, -crop.y / g.s, g.W / g.s, g.H / g.s, 0, 0, OW, OH);
+  let out = c.toDataURL('image/webp', crop.kind === 'banner' ? 0.78 : 0.82);
+  if (!out.startsWith('data:image/webp')) out = c.toDataURL('image/jpeg', 0.8);
+  if (crop.kind === 'banner' && out.length > 190000) out = c.toDataURL('image/jpeg', 0.6);
+  return out;
+}
+document.addEventListener('pointerdown', (e) => {
+  const st = e.target.closest('#cropStage'); if (!st) return;
+  e.preventDefault(); st.setPointerCapture?.(e.pointerId);
+  crop.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  crop.start = { x: crop.x, y: crop.y, z: crop.z, pts: new Map([...crop.pts].map(([k, v]) => [k, { ...v }])) };
+});
+document.addEventListener('pointermove', (e) => {
+  if (!crop.pts.has(e.pointerId) || !crop.start || !document.getElementById('cropStage')) return;
+  crop.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const now = [...crop.pts.values()], was = [...crop.start.pts.values()];
+  if (now.length >= 2 && was.length >= 2) {
+    const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const r = document.getElementById('cropStage').getBoundingClientRect();
+    Object.assign(crop, { x: crop.start.x, y: crop.start.y, z: crop.start.z });
+    cropZoomTo(crop.start.z * (d(now[0], now[1]) / (d(was[0], was[1]) || 1)), (now[0].x + now[1].x) / 2 - r.left, (now[0].y + now[1].y) / 2 - r.top);
+  } else if (now.length === 1) {
+    crop.x = crop.start.x + (now[0].x - was[0].x); crop.y = crop.start.y + (now[0].y - was[0].y);
+    if (crop.x === 0) crop.x = -0.0001; if (crop.y === 0) crop.y = -0.0001;
+    cropApply();
+  }
+});
+for (const t of ['pointerup', 'pointercancel']) document.addEventListener(t, (e) => { if (!crop.pts.delete(e.pointerId)) return; crop.start = crop.pts.size ? { x: crop.x, y: crop.y, z: crop.z, pts: new Map([...crop.pts].map(([k, v]) => [k, { ...v }])) } : null; });
+document.addEventListener('wheel', (e) => { const st = e.target.closest('#cropStage'); if (!st) return; e.preventDefault(); const r = st.getBoundingClientRect(); cropZoomTo(crop.z * (e.deltaY < 0 ? 1.08 : 1 / 1.08), e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+document.addEventListener('input', (e) => { if (e.target.id === 'cropZoom') cropZoomTo(Number(e.target.value)); });
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-crop]'); if (!b) return;
+  if (b.dataset.crop === 'ok') { const out = cropExport(), kind = crop.kind; openAccount(); saveProfileImage(out, kind); }
+  else openAccount();
+});
+
+// ---------- Classement : amis (calculé depuis leurs collections) et monde (leaderboard/<uid>, sur inscription) ----------
+// Séries vérifiées : une série complète ne compte qu'avec une photo prise en direct de sa carte la plus chère,
+// reconnue par le scanner de l'appli (proofs/<uid>/sets/<série>).
+if (!user.proofs || typeof user.proofs !== 'object') user.proofs = {};
+// cartes chères : elles ne comptent dans la valeur du classement qu'une fois vérifiées par photo en direct
+if (!user.cardProofs || typeof user.cardProofs !== 'object') user.cardProofs = {};
+const VERIFY_MIN = () => config.leaderboard?.verifyMin ?? 20;
+const needsProof = (id) => !isSealed(cardsById.get(id) ?? {}) && (price(id) ?? 0) >= VERIFY_MIN();
+const cardVerified = (id, proofs = user.cardProofs) => !!proofs?.[id.replace(/@(en|ja)$/, '')];
+const toVerifyCards = () => [...catalog.cards, ...extras].filter((c) => qtyAll(c.id) > 0 && needsProof(c.id) && !cardVerified(c.id)).sort((a, b) => (price(b.id) ?? 0) - (price(a.id) ?? 0));
+const lb = { tab: 'friends', metric: 'value', rows: null, loading: false, msg: '', timer: 0 };
+const setIsComplete = (code) => { const all = cardsBySet.get(code) ?? []; return all.length > 0 && all.every((c) => qtyAll(c.id) > 0); };
+const setTopCard = (code) => [...(cardsBySet.get(code) ?? [])].sort((a, b) => (price(b.id) ?? -1) - (price(a.id) ?? -1))[0];
+const verifiedSets = () => Object.keys(user.proofs).filter((code) => setOf(code) && setIsComplete(code));
+function myStats() {
+  let cards = 0, unique = 0, value = 0;
+  for (const c of [...catalog.cards, ...extras]) { const n = qtyAll(c.id); if (n) { cards += n; unique++; } }
+  let pending = 0;
+  for (const c of allItems()) { const v = valueAll(c.id); if (v && needsProof(c.id) && !cardVerified(c.id)) pending += v; else value += v; }
+  return { cards, unique, value: Math.round(value * 100) / 100, pending: Math.round(pending * 100) / 100, sets: catalog.sets.filter((s) => setIsComplete(s.code)).length, verified: verifiedSets() };
+}
+// collection d'un ami (sa carte « owned ») → mêmes chiffres, avec nos prix du jour
+function statsOf(owned, cardProofs = {}) {
+  let cards = 0, unique = 0, value = 0;
+  const seen = new Set();
+  for (const [k, n] of Object.entries(owned ?? {})) {
+    if (!(n > 0)) continue;
+    const id = k.replace(/@(en|ja)$/, ''), c = cardsById.get(id);
+    if (!c) continue;
+    if (!(needsProof(id) && !cardVerified(id, cardProofs))) value += n * (price(id) ?? 0);
+    if (!isSealed(c)) { cards += n; if (!seen.has(id)) { seen.add(id); unique++; } }
+  }
+  return { cards, unique, value: Math.round(value * 100) / 100 };
+}
+const lbRef = (uid) => cloud.api.fsM.doc(cloud.api.db, COL.leaderboard, uid);
+const proofRef = (uid, code) => cloud.api.fsM.doc(cloud.api.db, COL.proofs, uid, 'sets', code);
+const cardProofRef = (uid, id) => cloud.api.fsM.doc(cloud.api.db, COL.proofs, uid, 'cards', id);
+async function lbPush() {
+  if (!cloud.user || !user.prefs.lbPublic || !fr.me?.pseudo) return;
+  await cardsReady;
+  const s = myStats();
+  try { await cloud.api.fsM.setDoc(lbRef(cloud.user.uid), { pseudo: fr.me.pseudo, cards: s.cards, unique: s.unique, value: s.value, sets: s.sets, verified: s.verified, vsets: s.verified.length, updatedAt: cloud.api.fsM.serverTimestamp() }); }
+  catch (e) { if (e?.code === 'permission-denied') lb.msg = L.lb.rulesNeeded; }
+}
+const lbSoon = () => { clearTimeout(lb.timer); lb.timer = setTimeout(lbPush, 4000); };
+async function lbLoad() {
+  if (!cloud.user || !cloud.api) return;
+  lb.loading = true; lb.msg = ''; lb.rows = null;
+  if (currentRender === renderLeaderboard) renderLeaderboard();
+  const { fsM, db } = cloud.api;
+  try {
+    if (lb.tab === 'friends') {
+      const me = myStats();
+      const rows = [{ uid: cloud.user.uid, pseudo: fr.me?.pseudo ?? L.lb.me, me: true, cards: me.cards, unique: me.unique, value: me.value, verified: me.verified.length }];
+      await Promise.all(fr.list.map(async (f) => {
+        try {
+          const [u, b, g] = await Promise.all([fsM.getDoc(dref(COL.users, f.uid)), fsM.getDoc(lbRef(f.uid)).catch(() => null), fsM.getDoc(dref(COL.graded, f.uid)).catch(() => null)]);
+          const gd = g?.exists() ? g.data() : {};
+          const st = statsOf(migrateOwned({ ...(u.exists() ? u.data().owned ?? {} : {}) }), gd.cardProofs ?? {});
+          const vsets = Object.keys(gd.proofs ?? {}).length || (b?.exists() ? (b.data().verified ?? []).length : 0);
+          rows.push({ uid: f.uid, pseudo: f.pseudo, ...st, verified: vsets });
+        } catch { /* collection pas visible */ }
+      }));
+      lb.rows = rows;
+    } else {
+      if (user.prefs.lbPublic) await lbPush();
+      const field = lb.metric === 'sets' ? 'vsets' : lb.metric;
+      const snap = await fsM.getDocs(fsM.query(fsM.collection(db, COL.leaderboard), fsM.orderBy(field, 'desc'), fsM.limit(50)));
+      lb.rows = snap.docs.map((d) => { const x = d.data(); return { uid: d.id, pseudo: x.pseudo, cards: x.cards ?? 0, unique: x.unique ?? 0, value: x.value ?? 0, verified: (x.verified ?? []).length, me: d.id === cloud.user.uid }; });
+    }
+  } catch (e) { lb.rows = []; lb.msg = e?.code === 'permission-denied' ? L.lb.rulesNeeded : L.fr.error; }
+  lb.loading = false;
+  if (currentRender === renderLeaderboard) renderLeaderboard();
+}
+function renderLeaderboard() {
+  setTopbar(`<a class="icon-btn" href="#collection" aria-label="${L.back}">${I.back}</a><h1 class="small">${L.lb.title}</h1>`);
+  if (!cloud.user) { view.innerHTML = `<div class="empty"><strong>${L.lb.signIn}</strong><button class="btn-ghost" data-action="account">${L.account}</button></div>`; return; }
+  if (lb.rows === null && !lb.loading) { lbLoad(); return; }
+  const key = lb.metric === 'cards' ? 'cards' : lb.metric === 'sets' ? 'verified' : 'value';
+  const rows = [...(lb.rows ?? [])].sort((a, b) => b[key] - a[key] || b.value - a.value);
+  const mine = myStats();
+  const toVerify = catalog.sets.filter((s) => setIsComplete(s.code) && !user.proofs[s.code]);
+  view.innerHTML = `<div class="stack lb">
+    <div class="seg">${[['friends', L.lb.friends], ['world', L.lb.world]].map(([k, l]) => `<button data-lb-tab="${k}" aria-pressed="${lb.tab === k}">${l}</button>`).join('')}</div>
+    <div class="chips">${[['value', L.lb.mValue], ['cards', L.lb.mCards], ['sets', L.lb.mSets]].map(([k, l]) => `<button class="chip" data-lb-metric="${k}" aria-pressed="${lb.metric === k}">${l}</button>`).join('')}</div>
+    ${lb.tab === 'world' ? `<label class="lb-optin"><input type="checkbox" id="lbPublic" ${user.prefs.lbPublic ? 'checked' : ''}><span>${L.lb.optin}</span></label>${!fr.me?.pseudo ? `<p class="note">${L.lb.needPseudo} <a href="#friends">${L.fr.title}</a></p>` : ''}` : ''}
+    ${lb.msg ? `<p class="form-err">${esc(lb.msg)}</p>` : ''}
+    ${lb.loading ? `<div class="empty"><strong>${L.fr.loading}</strong></div>` : rows.length ? `<ol class="lb-list">${rows.map((r, i) => `<li class="lb-row ${r.me ? 'me' : ''}">
+        <span class="lb-rank num">${i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</span>
+        <button class="lb-name" data-lb-proofs="${esc(r.uid)}" data-pseudo="${esc(r.pseudo)}"><b>@${esc(r.pseudo)}</b><span class="note num">${L.lb.line(r.cards, r.unique, r.verified)}</span></button>
+        <span class="lb-val num">${lb.metric === 'cards' ? `${r.cards}` : lb.metric === 'sets' ? `${r.verified} ✓` : eur(r.value)}</span>
+      </li>`).join('')}</ol>` : `<div class="empty"><strong>${lb.tab === 'world' ? L.lb.emptyWorld : L.lb.emptyFriends}</strong></div>`}
+    <section class="panel"><h3>${L.lb.myCards(VERIFY_MIN())}<small class="num">${mine.pending ? L.lb.pending(eur(mine.pending)) : ''}</small></h3>
+      ${toVerifyCards().length ? `${toVerifyCards().slice(0, 30).map((c) => `<div class="lb-verify"><span><b class="num">${eur(price(c.id))}</b>${esc(cardName(c))}</span><button class="chip" data-proof-card="${esc(c.id)}">${I.camera}<span>${L.lb.verify}</span></button></div>`).join('')}` : `<p class="note" style="margin:0">${L.lb.cardsAllOk}</p>`}
+      <p class="note" style="margin:0">${L.lb.cardRule(VERIFY_MIN())}</p>
+    </section>
+    <section class="panel"><h3>${L.lb.mySets}<small>${L.lb.verifiedCount(mine.verified.length, mine.sets)}</small></h3>
+      ${toVerify.length ? toVerify.map((s) => `<div class="lb-verify"><span><b class="title-code">${esc(s.print ?? s.code)}</b>${esc(setName(s))}</span><button class="chip" data-proof="${esc(s.code)}">${I.camera}<span>${L.lb.verify}</span></button></div>`).join('') : `<p class="note" style="margin:0">${mine.sets ? L.lb.allVerified : L.lb.noneComplete}</p>`}
+      <p class="note" style="margin:0">${L.lb.rule}</p>
+    </section>
+  </div>`;
+}
+// preuves d'un joueur (photos des cartes les plus chères de ses séries vérifiées)
+async function openProofs(uid, pseudo) {
+  openId = null; sheetMode = 'proofs';
+  sheetPanel.innerHTML = `${sheetTop()}<div class="stack"><h2 id="sheetTitle" style="margin:0;font:700 22px var(--font-display)">@${esc(pseudo)}</h2><p class="note">${L.fr.loading}</p></div>`;
+  sheet.hidden = false; document.body.style.overflow = 'hidden';
+  let items = [];
+  let cardsP = [];
+  try { const snap = await cloud.api.fsM.getDocs(cloud.api.fsM.collection(cloud.api.db, COL.proofs, uid, 'sets')); items = snap.docs.map((d) => ({ code: d.id, ...d.data() })); } catch { /* */ }
+  try { const snap = await cloud.api.fsM.getDocs(cloud.api.fsM.collection(cloud.api.db, COL.proofs, uid, 'cards')); cardsP = snap.docs.map((d) => ({ id: d.id, ...d.data() })); } catch { /* */ }
+  if (sheetMode !== 'proofs') return;
+  sheetPanel.innerHTML = `${sheetTop()}<div class="stack">
+    <h2 id="sheetTitle" style="margin:0;font:700 22px var(--font-display)">@${esc(pseudo)}</h2>
+    <p class="note" style="margin:0">${L.lb.proofsIntro}</p>
+    ${items.length ? `<h3 class="deck-group">${L.lb.mSets}</h3><div class="proofs">${items.map((p) => { const s = setOf(p.code), c = cardsById.get(p.card); return `<figure class="proof"><img src="${esc(p.img)}" alt=""><figcaption><b class="title-code">${esc(s?.print ?? p.code)}</b>${esc(c ? cardName(c) : '')}</figcaption></figure>`; }).join('')}</div>` : ''}
+    ${cardsP.length ? `<h3 class="deck-group">${L.lb.verifiedCards}</h3><div class="proofs">${cardsP.map((p) => { const c = cardsById.get(p.card ?? p.id); return `<figure class="proof"><img src="${esc(p.img)}" alt=""><figcaption>${esc(c ? cardName(c) : '')}${c && price(c.id) != null ? ` · ${eur(price(c.id))}` : ''}</figcaption></figure>`; }).join('')}</div>` : ''}
+    ${!items.length && !cardsP.length ? `<div class="empty"><strong>${L.lb.noProofs}</strong></div>` : ''}
+  </div>`;
+}
+
+// --- photo en direct de la carte la plus chère d'une série complète ---
+const proof = { code: '', target: null, stream: null, timer: 0, hits: 0, busy: false };
+async function openProofCamera(code, cardId) {
+  if (!cloud.user) { toast(L.lb.signIn); return; }
+  if (!cardId && !setIsComplete(code)) { toast(L.lb.notComplete); return; }
+  closeProofCamera();
+  const target = cardId ? cardsById.get(cardId) : setTopCard(code);
+  if (!target) return;
+  Object.assign(proof, { code: cardId ? '' : code, cardId: cardId ?? '', target, hits: 0, busy: false });
+  const el = document.createElement('div');
+  el.className = 'scanner'; el.id = 'proofCam';
+  el.innerHTML = `<video id="proofVideo" playsinline muted autoplay></video>
+    <div class="scan-shade"></div>
+    <div class="scan-guide" id="proofGuide"><i></i><i></i><i></i><i></i></div>
+    <div class="scan-top"><button class="icon-btn" data-proofcam="close" aria-label="${L.close}">${I.x}</button><strong>${L.lb.camTitle}</strong><span></span></div>
+    <div class="scan-panel" id="proofPanel">
+      <div class="proof-target"><img src="${esc(imageOf(target) || placeholderArt(target))}" alt=""><span><b>${esc(cardName(target))}</b><small>${cardId ? L.lb.camHintCard : L.lb.camHint(esc(setName(setOf(code))))}</small></span></div>
+      <p class="scan-status" id="proofStatus">${L.scan.starting}</p>
+      <button class="cta" data-proofcam="shot">${I.camera}<span>${L.lb.shoot}</span></button>
+    </div>`;
+  document.body.appendChild(el); document.body.style.overflow = 'hidden';
+  try { await scanLoadIndex(); } catch { proofStatus(L.scan.indexErr); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { proofStatus(L.lb.noCamera); return; }
+  try { proof.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } }); }
+  catch (e) { proofStatus(e?.name === 'NotAllowedError' ? L.scan.denied : L.lb.noCamera); return; }
+  const video = document.getElementById('proofVideo');
+  if (!video) { closeProofCamera(); return; }
+  video.srcObject = proof.stream;
+  proofStatus(L.lb.aim);
+  // reconnaissance en continu : photo prise toute seule quand la bonne carte est tenue bien en face
+  proof.timer = setInterval(() => { if (!proof.busy && video.videoWidth) proofCheck(false); }, 400);
+}
+function proofStatus(t) { const s = document.getElementById('proofStatus'); if (s) s.textContent = t; }
+function proofGrab(w, h) {
+  const video = document.getElementById('proofVideo'), g = document.getElementById('proofGuide').getBoundingClientRect(), vr = video.getBoundingClientRect();
+  const k = Math.max(vr.width / video.videoWidth, vr.height / video.videoHeight);
+  const ox = (video.videoWidth * k - vr.width) / 2, oy = (video.videoHeight * k - vr.height) / 2;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(video, (g.left - vr.left + ox) / k, (g.top - vr.top + oy) / k, g.width / k, g.height / k, 0, 0, w, h);
+  return { c, ctx };
+}
+const isTargetPrint = (id) => { const c = cardsById.get(id); return !!c && nameKey(c) === nameKey(proof.target); };
+async function proofCheck(manual) {
+  const { ctx } = proofGrab(SCAN.RW, SCAN.RH);
+  const res = scanMatch(ctx.getImageData(0, 0, SCAN.RW, SCAN.RH).data);
+  const hit = res.slice(0, 3).find(([id, sc]) => isTargetPrint(id) && sc >= SCAN.MIN);
+  if (!hit) {
+    proof.hits = 0;
+    if (manual) { proofStatus(res[0][1] >= SCAN.MIN && !isTargetPrint(res[0][0]) ? L.lb.wrongCard(cardName(cardsById.get(res[0][0]))) : L.lb.notRecognised); navigator.vibrate?.([30, 60, 30]); }
+    return;
+  }
+  if (!manual && ++proof.hits < 2) { proofStatus(L.scan.holding); return; }
+  proofSave();
+}
+async function proofSave() {
+  proof.busy = true; clearInterval(proof.timer);
+  navigator.vibrate?.(40);
+  const { c } = proofGrab(360, 503);
+  let img = c.toDataURL('image/webp', 0.8);
+  if (!img.startsWith('data:image/webp')) img = c.toDataURL('image/jpeg', 0.8);
+  proofStatus(L.mod.checking);
+  try {
+    await moderateImage(img);   // la photo est visible par les autres joueurs
+    const today = new Date().toISOString().slice(0, 10);
+    if (proof.cardId) {
+      await cloud.api.fsM.setDoc(cardProofRef(cloud.user.uid, proof.cardId), { img, card: proof.cardId, at: cloud.api.fsM.serverTimestamp() });
+      user.cardProofs[proof.cardId] = { at: today };
+    } else {
+      await cloud.api.fsM.setDoc(proofRef(cloud.user.uid, proof.code), { img, card: proof.target.id, at: cloud.api.fsM.serverTimestamp() });
+      user.proofs[proof.code] = { card: proof.target.id, at: today };
+    }
+    gSave(); save(); lbPush();
+    const { code, cardId } = proof;
+    closeProofCamera();
+    toast(cardId ? L.lb.cardVerified(cardName(cardsById.get(cardId))) : L.lb.verified(setName(setOf(code))));
+    if (openId && !sheet.hidden) openCard(openId, true);
+    if (currentRender) currentRender();
+  } catch (e) {
+    proofStatus(e?.userMsg ?? (e?.code === 'permission-denied' ? L.lb.rulesNeeded : L.fr.error));
+    proof.busy = false; proof.hits = 0;
+    const video = document.getElementById('proofVideo');
+    if (video) proof.timer = setInterval(() => { if (!proof.busy && video.videoWidth) proofCheck(false); }, 400);
+  }
+}
+function closeProofCamera() {
+  clearInterval(proof.timer);
+  proof.stream?.getTracks().forEach((t) => t.stop()); proof.stream = null;
+  document.getElementById('proofCam')?.remove();
+  if (sheet.hidden) document.body.style.overflow = '';
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-lb-tab],[data-lb-metric],[data-lb-proofs],[data-proof],[data-proof-card],[data-proofcam]');
+  if (!t) return;
+  const d = t.dataset;
+  if (d.lbTab) { lb.tab = d.lbTab; lb.rows = null; renderLeaderboard(); }
+  else if (d.lbMetric) { lb.metric = d.lbMetric; if (lb.tab === 'world') lb.rows = null; renderLeaderboard(); }
+  else if (d.lbProofs) openProofs(d.lbProofs, d.pseudo);
+  else if (d.proof) openProofCamera(d.proof);
+  else if (d.proofCard) openProofCamera('', d.proofCard);
+  else if (d.proofcam === 'close') closeProofCamera();
+  else if (d.proofcam === 'shot' && !proof.busy && document.getElementById('proofVideo')?.videoWidth) proofCheck(true);
+});
+document.addEventListener('change', async (e) => {
+  if (e.target.id !== 'lbPublic') return;
+  user.prefs.lbPublic = e.target.checked; save();
+  if (user.prefs.lbPublic) { await lbPush(); toast(L.lb.joined); }
+  else { try { await cloud.api.fsM.deleteDoc(lbRef(cloud.user.uid)); } catch { /* */ } toast(L.lb.left); }
+  lb.rows = null; renderLeaderboard();
+});
+
+onCollectionChange = () => { if (user.prefs.lbPublic) lbSoon(); };
+
+// ---------- Listes (comme Pokécardex) : types de cartes, raretés, couleurs, licences, personnages ----------
+const T2 = (fr, en) => ({ fr, en });
+const slugId = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '');
+const licenceOf = (c) => setOf(c.set)?.block ?? 'misc';
+const RAR_LISTS = [
+  ['ssp', T2('SSP & SEC (signées, secrètes)', 'SSP & SEC (signed, secret)'), T2('Les versions signées (SSP), secrètes (SEC) et autres raretés ultimes.', 'Signed (SSP), secret (SEC) and other top rarities.'), (c) => rarityTier(c.rarity) === 4],
+  ['sp', T2('SP & raretés spéciales', 'SP & special rarities'), T2('Les SP dorées et les raretés propres à chaque licence (OFR, HLP, BDR…).', 'Gold SP and licence-specific rarities (OFR, HLP, BDR…).'), (c) => rarityTier(c.rarity) === 3],
+  ['foil', T2('RRR & SR (foil)', 'RRR & SR (foil)'), T2('Les versions brillantes des cartes de la série.', 'Foil versions of the set\'s cards.'), (c) => rarityTier(c.rarity) === 2],
+  ['rr', T2('RR', 'RR'), T2('Les doubles rares, piliers des decks.', 'Double rares, the core of decks.'), (c) => /^RR\+?$/.test(normR(c.rarity))],
+  ['pr', T2('Promos (PR)', 'Promos (PR)'), T2('Cartes promotionnelles : événements, magazines, coffrets…', 'Promo cards: events, magazines, boxes…'), (c) => /^PR/.test(normR(c.rarity))],
+  ['td', T2('Decks de démarrage (TD)', 'Trial decks (TD)'), T2('Les cartes des decks de démarrage.', 'Trial deck cards.'), (c) => /^TD/.test(normR(c.rarity))],
+  ['cx', T2('Climax rares (CR / CC)', 'Climax rares (CR / CC)'), T2('Toutes les climax de la collection.', 'Every climax card.'), (c) => /^(CR|CC)$/.test(normR(c.rarity))],
+];
+const LISTS = [
+  { id: 'character', group: 'collection', title: T2('Personnages', 'Characters'), desc: T2('Toutes les cartes personnage.', 'All character cards.'), test: (c) => c.type === 'Character' },
+  { id: 'event', group: 'collection', title: T2('Événements', 'Events'), desc: T2('Toutes les cartes événement.', 'All event cards.'), test: (c) => c.type === 'Event' },
+  { id: 'climax', group: 'collection', title: T2('Climax', 'Climax'), desc: T2('Toutes les cartes climax.', 'All climax cards.'), test: (c) => c.type === 'Climax' },
+  { id: 'weiss', group: 'collection', title: T2('Côté Weiß', 'Weiß side'), desc: T2('Les séries du côté blanc (W).', 'White side sets (W).'), test: (c) => setOf(c.set)?.side === 'W' },
+  { id: 'schwarz', group: 'collection', title: T2('Côté Schwarz', 'Schwarz side'), desc: T2('Les séries du côté noir (S).', 'Black side sets (S).'), test: (c) => setOf(c.set)?.side === 'S' },
+  ...RAR_LISTS.map(([k, title, desc, test]) => ({ id: `r-${k}`, group: 'rarity', title, desc, test })),
+  ...Object.keys(FACTION).map((k) => ({ id: `col-${k.toLowerCase()}`, group: 'color', title: T2(TEXT.fr.color[k], k), desc: T2(`Les cartes ${TEXT.fr.color[k].toLowerCase()}es, toutes licences.`.replace('ees,', 'es,').replace('Bleues', 'Bleues'), `All ${k.toLowerCase()} cards, every licence.`), test: (c) => c.color === k })),
+];
+// personnages : une liste par (licence, personnage) avec au moins 3 cartes ; ceux d'au moins CHAR_TOP cartes sont aussi sur la page Listes
+const CHAR_MIN = 3, CHAR_TOP = 25;
+let dynLists = null;
+const listCache = new Map();
+function allLists() {
+  if (!dynLists) {
+    const lic = new Set(), chars = new Map();
+    for (const c of catalog.cards) {
+      lic.add(licenceOf(c));
+      if (c.ch) { const k = `${licenceOf(c)}|${c.ch}`; chars.set(k, (chars.get(k) ?? 0) + 1); }
+    }
+    dynLists = [
+      ...[...lic].map((b) => ({ id: `l-${slugId(b)}`, lic: b, group: 'licence', title: T2(blockName(b), blockName(b)), desc: T2('Toutes les cartes de la licence, toutes séries confondues.', 'Every card of the licence, all sets.'), key: licenceOf })),
+      ...[...chars].filter(([, n]) => n >= CHAR_MIN).map(([k]) => { const [b, ch] = k.split('|'); return { id: `c-${slugId(b)}-${slugId(ch)}`, lic: b, ch, group: 'character', title: T2(ch, ch), desc: T2(`Toutes les cartes de ${ch} (${blockName(b)}).`, `All ${ch} cards (${blockName(b)}).`), key: (c) => (c.ch ? `${licenceOf(c)}|${c.ch}` : null), val: k }; }),
+    ];
+  }
+  return [...LISTS, ...dynLists];
+}
+// cartes de chaque liste dans l'édition affichée : calculées en un seul passage, gardées en cache
+function listIndex() {
+  if (listCache.has(cardLang)) return listCache.get(cardLang);
+  const idx = new Map(), lists = allLists();
+  const byKey = new Map();
+  for (const d of lists) if (d.key) byKey.set(d.val ?? d.lic, d);
+  for (const c of catalog.cards) {
+    if (!inCardLang(c)) continue;
+    for (const d of LISTS) if (d.test(c)) { if (!idx.has(d.id)) idx.set(d.id, []); idx.get(d.id).push(c); }
+    for (const k of [licenceOf(c), c.ch ? `${licenceOf(c)}|${c.ch}` : null]) {
+      const d = k && byKey.get(k);
+      if (d) { if (!idx.has(d.id)) idx.set(d.id, []); idx.get(d.id).push(c); }
+    }
+  }
+  for (const l of idx.values()) l.sort(byNumber);
+  listCache.set(cardLang, idx);
+  return idx;
+}
+const listTitle = (d) => d.title[lang] ?? d.title.en;
+const listDesc = (d) => d.desc[lang] ?? d.desc.en;
+const setOrderOf = (c) => setOf(c.set)?.order ?? 999;
+const byNumber = (a, b) => setOrderOf(b) - setOrderOf(a) || (a.set < b.set ? -1 : a.set > b.set ? 1 : byCardNumber(a, b));
+const listCards = (d) => listIndex().get(d.id) ?? [];
+function bestArt(cards) {
+  const rank = (c) => rarityTier(c.rarity);
+  const best = [...cards].filter((c) => imageOf(c)).sort((a, b) => rank(b) - rank(a) || (price(b.id) ?? 0) - (price(a.id) ?? 0))[0];
+  return best ? imageOf(best) : null;
+}
+const cardsLen = (d) => listCards(d).length;
+// page d'une licence : raccourcis vers ses personnages
+function licenceChars(d) {
+  const chars = allLists().filter((x) => x.group === 'character' && x.lic === d.lic).map((x) => [x, cardsLen(x)]).filter(([, n]) => n >= CHAR_MIN).sort((a, b) => b[1] - a[1]);
+  return chars.length ? `<details class="block lists-block"><summary>${L.ls.chars} <small class="num">${chars.length}</small>${I.chevron}</summary><div class="chips wrap">${chars.map(([x, n]) => `<a class="chip" href="#list-${esc(x.id)}">${esc(listTitle(x))} <small class="num">${n}</small></a>`).join('')}</div></details>` : '';
+}
+function listCard(d, cards) {
+  const own = cards.filter((c) => qty(c.id) > 0).length, total = cards.length, p = total ? own / total : 0;
+  const art = bestArt(cards), key = `list:${d.id}`;
+  return `<div class="list-card ${p >= 1 ? 'done' : ''}" ${art ? `style="--art:url('${esc(art)}')"` : ''}>
+    <a class="list-link" href="#list-${esc(d.id)}" aria-label="${esc(listTitle(d))}"></a>
+    <div class="list-top"><h3>${esc(listTitle(d))}</h3>
+      <button class="icon-btn list-star ${fav.has(key) ? 'on' : ''}" data-fav="${esc(key)}" aria-pressed="${fav.has(key)}" aria-label="${L.ls.fav}">${I.star}</button></div>
+    <p class="list-desc">${esc(listDesc(d))}</p>
+    <div class="list-prog num"><b>${own}</b><small>/${total}</small><span>${Math.floor(p * 100)} %</span></div>
+    <div class="bar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>
+  </div>`;
+}
+function renderLists() {
+  homeTopbar(false);
+  const withCards = allLists().map((d) => [d, listCards(d)]).filter(([, cards]) => cards.length);
+  const byName = (a, b) => listTitle(a[0]).localeCompare(listTitle(b[0]), fmt.loc);
+  const groups = [['fav', withCards.filter(([d]) => fav.has(`list:${d.id}`))], ...['collection', 'rarity', 'color', 'licence', 'character'].map((g) => [g, withCards.filter(([d]) => d.group === g && (g !== 'character' || cardsLen(d) >= CHAR_TOP))])];
+  for (const [g, l] of groups) if (g === 'licence' || g === 'character') l.sort(byName);
+  view.innerHTML = `<div class="stack">
+    ${homeTabs('lists')}
+    <p class="note" style="margin:0">${L.ls.intro}</p>
+    ${groups.filter(([, l]) => l.length).map(([g, l]) => `<details class="block lists-block" ${g === 'licence' || g === 'character' ? '' : 'open'}>
+      <summary>${esc(L.ls.groups[g])} <small class="num">${l.length}</small>${I.chevron}</summary>
+      ${g === 'character' ? `<p class="note" style="margin:0 0 8px">${L.ls.allChars(CHAR_TOP)}</p>` : ''}
+      <div class="list-grid">${l.map(([d, cards]) => listCard(d, cards)).join('')}</div>
+    </details>`).join('')}
+  </div>`;
+}
+function renderList(id) {
+  const d = allLists().find((x) => x.id === id);
+  if (!d) { location.hash = '#lists'; return; }
+  const all = listCards(d);
+  const list = sortCards(filterCards(all), user.prefs.sort);
+  const own = all.filter((c) => qty(c.id) > 0).length, p = all.length ? own / all.length : 0;
+  const value = all.reduce((a, c) => a + valueOf(c.id), 0);
+  const art = bestArt(all), key = `list:${d.id}`;
+  setTopbar(`<a class="icon-btn" href="#lists" aria-label="${L.back}">${I.back}</a><h1 class="small">${esc(listTitle(d))}</h1>
+    <button class="icon-btn ${fav.has(key) ? 'on' : ''}" data-fav="${esc(key)}" aria-pressed="${fav.has(key)}" aria-label="${L.ls.fav}">${I.star}</button>
+    <button class="icon-btn" data-action="cycle-sort" aria-label="${L.changeSort}">${I.sort}</button>`);
+  view.innerHTML = `<div class="stack">
+    <div class="set-hero" ${art ? `style="--art:url('${esc(art)}')"` : ''}>
+      <div class="set-hero-text"><span class="title-code">${esc(d.group === 'character' ? blockName(d.lic) : L.ls.groups[d.group])}</span><h2>${esc(listTitle(d))}</h2><small>${esc(listDesc(d))}</small></div>
+      <div class="set-hero-prog num"><b>${Math.floor(p * 100)} %</b><span>${own}/${all.length}</span></div>
+      <div class="bar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>
+    </div>
+    ${seg('setMode', user.prefs.setMode, [['cards', L.cards], ['list', L.list], ['grid', L.grid]])}
+    ${d.group === 'licence' ? licenceChars(d) : ''}
+    <div class="toolbar num"><span>${L.owned(own, all.length)}</span><span class="grow"></span>${hasPrices() ? `<span>${L.myValue} : <b style="color:var(--fg)">${eur(value)}</b></span>` : ''}</div>
+    ${cardsBlock(list, user.prefs.setMode)}
+  </div>`;
+}
+
+// ---------- Classeurs virtuels (comme RiftDex) ----------
+// Classeurs perso : pages de 2×2 à 4×4 cases, couverture de couleur, cartes placées case par case (un en gratuit, illimités pour les soutiens).
+// Classeurs « Master Set » : une série entière dans l'ordre des numéros, les cartes manquantes en gris (lecture seule).
+if (!Array.isArray(user.binders)) user.binders = [];
+const BD_COLORS = ['#7a1f2b', '#1f3a7a', '#1f6b4a', '#5b2a86', '#8a6a1f', '#1b1b1f', '#b0475f', '#2a7d8c'];
+const BD_LAYOUTS = [['2x2', '2×2'], ['3x3', '3×3'], ['3x4', '3×4'], ['4x3', '4×3'], ['4x4', '4×4']];
+const BD_FREE = 1;
+const bd = { page: 0, edit: false, confirmDel: false, pickSlot: null, pickQ: '' };
+const canAddBinder = () => !!cloud.supporter || user.binders.length < BD_FREE;
+const bdOwned = (b, c) => (b.auto ? qty(c.id) : qtyAll(c.id));
+function binderOf(id) {
+  if (id.startsWith('set-')) {
+    const s = setOf(id.slice(4));
+    if (!s) return null;
+    return { id, name: setName(s), size: 9, cols: 3, rows: 3, color: '#0f1625', auto: true, set: s, slots: setCards(s.code).map((c) => c.id) };
+  }
+  return user.binders.find((x) => x.id === id) ?? null;
+}
+const binderPages = (b) => Math.max(1, Math.ceil(b.slots.length / b.size));
+function binderCover(b) {
+  const cards = b.slots.map((id) => cardsById.get(id)).filter(Boolean);
+  const ownedCards = cards.filter((c) => bdOwned(b, c) > 0);
+  const vOwn = ownedCards.reduce((a, c) => a + (price(c.id) ?? 0), 0), vAll = cards.reduce((a, c) => a + (price(c.id) ?? 0), 0);
+  const art = bestArt(cards);
+  return `<a class="binder-card ${b.auto ? 'auto' : ''}" href="#binder-${esc(b.id)}" style="--bc:${esc(b.color)}">
+    <span class="bk-art">${art ? `<img src="${esc(art)}" alt="" loading="lazy">` : ''}</span>
+    <span class="bk-text">${b.auto ? `<b class="print">${esc(b.set.print ?? b.set.code)}</b>` : ''}<strong>${esc(b.name)}</strong>
+      <span>${L.bd.owned(ownedCards.length, cards.length)}</span><span>${L.bd.pages(binderPages(b))} · ${b.cols}×${b.rows}</span>
+      <em class="num">${L.bd.value(eur(vOwn), eur(vAll))}</em></span>
+  </a>`;
+}
+function renderBinders() {
+  setTopbar(`<h1>${L.myCollection}</h1>${langBtn()}`);
+  const mine = user.binders;
+  const form = canAddBinder() ? `<section class="panel binder-new">
+      <h3>${L.bd.new}</h3>
+      <form id="binderForm" class="binder-form">
+        <input class="search" id="binderName" maxlength="40" placeholder="${esc(L.bd.namePh)}" aria-label="${esc(L.bd.name)}" autocomplete="off">
+        <div class="bf-row"><span>${L.bd.layout}</span>${seg('bdLayout', user.prefs.bdLayout ?? '3x3', BD_LAYOUTS)}</div>
+        <div class="bf-row"><span>${L.bd.color}</span><div class="bd-colors">${BD_COLORS.map((c, i) => `<label style="--c:${c}"><input type="radio" name="bdColor" value="${c}" ${i === 0 ? 'checked' : ''}><i></i></label>`).join('')}</div></div>
+        <button class="cta">${L.bd.create}</button>
+      </form>
+      ${cloud.supporter ? '' : `<p class="note" style="margin:0">${L.bd.limit}</p>`}
+    </section>` : `<section class="plus-card">
+      <strong class="plus-logo">WEISS<i>DEX</i><span>+</span></strong>
+      <p><span class="plus-ic">📚</span>${L.bd.plusUnlimited}</p>
+      <p><span class="plus-ic">⭐</span>${L.bd.plusMore}</p>
+      ${supportUrl() ? `<a class="plus-btn" href="${esc(supportUrl())}" target="_blank" rel="noopener">🚀 ${L.bd.plusBtn}</a>` : ''}
+      <small>${L.bd.plusHint}</small>
+    </section>`;
+  view.innerHTML = `<div class="stack">
+    ${colTabs('binders')}
+    <h2 class="section-title">${L.bd.mine} <small class="num">${mine.length}</small></h2>
+    ${mine.length ? `<div class="binder-list">${mine.map(binderCover).join('')}</div>` : `<p class="note">${L.bd.none}</p>`}
+    ${form}
+    <h2 class="section-title">${L.bd.master}</h2>
+    <div class="binder-list">${[...catalog.sets].filter((s) => setCards(s.code).length).sort((a, b) => (a.order ?? 999) - (b.order ?? 999)).map((s) => binderCover(binderOf(`set-${s.code}`))).join('')}</div>
+  </div>`;
+}
+function slotHtml(b, i) {
+  const id = b.slots[i];
+  const c = id ? cardsById.get(id) : null;
+  if (!c) return `<button class="slot empty" ${b.auto ? 'disabled' : `data-bslot="${i}"`} aria-label="${L.bd.pick}">${b.auto ? '' : '+'}</button>`;
+  const q = bdOwned(b, c), p = price(c.id);
+  return `<div class="slot ${q ? 'owned' : 'missing'}">
+    <button class="slot-card" data-open="${esc(c.id)}" aria-label="${esc(cardName(c))}">${cardImg(c)}</button>
+    ${p != null && user.prefs.bdPrices !== 'off' ? `<span class="slot-price num">${eur(p)}</span>` : ''}
+    ${bd.edit && !b.auto ? `<button class="slot-x" data-bremove="${i}" aria-label="${L.bd.remove}">${I.x}</button>` : ''}
+    ${q > 1 ? `<span class="slot-q num">×${q}</span>` : ''}
+  </div>`;
+}
+function renderBinder(id) {
+  const b = binderOf(id);
+  if (!b) { location.hash = '#binders'; return; }
+  const pages = binderPages(b);
+  bd.page = Math.min(bd.page, pages - 1);
+  const spread = isPC() ? 2 : 1;
+  const first = Math.floor(bd.page / spread) * spread;
+  const cards = b.slots.map((x) => cardsById.get(x)).filter(Boolean);
+  const ownCards = cards.filter((c) => bdOwned(b, c) > 0);
+  setTopbar(`<a class="icon-btn" href="#binders" aria-label="${L.back}">${I.back}</a><h1 class="small">${b.auto ? `<span class="title-code">${esc(b.set.print ?? b.set.code)}</span>` : ''}${esc(b.name)}</h1>
+    <button class="icon-btn ${user.prefs.bdPrices === 'off' ? '' : 'on'}" data-bd="prices" aria-label="${L.bd.prices}" title="${L.bd.prices}">€</button>`);
+  const page = (p) => `<div class="bpage" style="--bc:${esc(b.color)};--cols:${b.cols};--rows:${b.rows}">${Array.from({ length: b.size }, (_, k) => slotHtml(b, p * b.size + k)).join('')}<span class="bpage-num num">${p + 1}</span></div>`;
+  view.innerHTML = `<div class="stack">
+    <div class="toolbar num"><span>${L.bd.owned(ownCards.length, cards.length)}</span><span class="grow"></span><span>${L.bd.value(eur(ownCards.reduce((a, c) => a + (price(c.id) ?? 0), 0)), eur(cards.reduce((a, c) => a + (price(c.id) ?? 0), 0)))}</span></div>
+    <div class="binder-view" id="binderView">${Array.from({ length: spread }, (_, k) => first + k).filter((p) => p < pages).map(page).join('')}</div>
+    <div class="binder-nav">
+      <button class="bn-btn" data-bd="prev" ${first <= 0 ? 'disabled' : ''} aria-label="${L.prev}">${I.back}</button>
+      <span class="bn-page num">${first + 1} / ${pages}</span>
+      <button class="bn-btn primary flip-x" data-bd="next" ${first + spread >= pages ? 'disabled' : ''} aria-label="${L.next}">${I.back}</button>
+      ${b.auto ? '' : `<button class="bn-btn primary ${bd.edit ? 'on' : ''}" data-bd="edit" aria-label="${L.bd.settings}" title="${L.bd.settings}">${I.gear}</button>`}
+    </div>
+    ${b.auto ? `<p class="note">${L.bd.readOnly}</p>` : bd.edit ? `<section class="panel">
+      <h3>${L.bd.fill}</h3>
+      <div class="chips wrap">${catalog.sets.filter((s) => setCards(s.code).length).map((s) => `<button class="chip" data-bfill="set:${esc(s.code)}">${esc(s.print ?? s.code)}</button>`).join('')}<button class="chip" data-bfill="owned">${L.bd.fillOwned}</button></div>
+      <select class="search" id="bdFillList"><option value="">${L.bd.fillList}…</option>${allLists().filter((d) => d.group !== 'artist').map((d) => `<option value="${esc(d.id)}">${esc(listTitle(d))}</option>`).join('')}</select>
+      <div class="bf-row"><span>${L.bd.layout}</span>${BD_LAYOUTS.map(([k, l]) => `<button class="chip" data-bdlayout="${k}" aria-pressed="${`${b.cols}x${b.rows}` === k}">${l}</button>`).join('')}</div>
+      <div class="chips wrap"><button class="chip" data-bd="addpage">${L.bd.addPage}</button><button class="chip" data-bd="rename">${L.bd.rename}</button>
+      <button class="chip ${bd.confirmDel ? 'danger' : ''}" data-bd="delete">${bd.confirmDel ? L.bd.delConfirm : L.bd.del}</button></div>
+    </section>` : ''}
+  </div>`;
+}
+let pickCb = null;
+function openPicker(slot, onPick = null) {
+  bd.pickSlot = slot; bd.pickQ = ''; pickCb = onPick;
+  let el = document.getElementById('picker');
+  if (!el) { el = document.createElement('div'); el.id = 'picker'; el.className = 'picker'; document.body.append(el); }
+  el.hidden = false;
+  el.innerHTML = `<div class="picker-panel" role="dialog" aria-modal="true" aria-label="${L.bd.pick}">
+    <div class="picker-head"><input class="search" id="pickerQ" placeholder="${esc(L.bd.pickPh)}" autocomplete="off"><button class="icon-btn" data-pick="close" aria-label="${L.close}">${I.x}</button></div>
+    <div class="cards compact" id="pickerRes"></div></div>`;
+  pickerResults();
+  el.querySelector('#pickerQ').focus();
+}
+function pickerResults() {
+  const q = fold(bd.pickQ.trim());
+  const res = [...catalog.cards, ...extras].filter((c) => inCardLang(c) && (!q || fold([c.name, c.nameEn, `${printCode(c.set)} ${c.number}`, `${c.set} ${c.number}`].join(' ')).includes(q)))
+    .sort((a, b) => (qtyAll(b.id) > 0) - (qtyAll(a.id) > 0) || byNumber(a, b)).slice(0, 60);
+  document.getElementById('pickerRes').innerHTML = res.map((c) => `<button class="card ${qtyAll(c.id) ? 'owned' : 'missing'} pick-card" data-pick="${esc(c.id)}"><span class="card-img">${cardImg(c)}<span class="num-badge num">${esc(printCode(c.set))} ${esc(c.number)}</span></span></button>`).join('');
+}
+function closePicker() { const el = document.getElementById('picker'); if (el) el.hidden = true; bd.pickSlot = null; pickCb = null; }
+function binderEdit(fn) {
+  const b = user.binders.find((x) => x.id === location.hash.slice(8));
+  if (!b) return;
+  fn(b);
+  gSave(); currentRender();
+}
+function binderFill(b, ids) {
+  let i = 0;
+  for (const id of ids) {
+    if (b.slots.includes(id)) continue;
+    while (b.slots[i] != null) i++;
+    b.slots[i] = id; i++;
+  }
+  const pages = Math.ceil(b.slots.length / b.size);
+  for (let k = 0; k < pages * b.size; k++) if (b.slots[k] === undefined) b.slots[k] = null;
+}
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'binderForm') return;
+  e.preventDefault();
+  if (!canAddBinder()) { currentRender(); return; }
+  const name = document.getElementById('binderName').value.trim() || L.bd.new;
+  const color = e.target.querySelector('input[name="bdColor"]:checked')?.value ?? BD_COLORS[0];
+  const [cols, rows] = String(user.prefs.bdLayout ?? '3x3').split('x').map(Number);
+  const b = { id: `b${Date.now().toString(36)}`, name: name.slice(0, 40), size: cols * rows, cols, rows, color, slots: Array(cols * rows).fill(null) };
+  user.binders.push(b); gSave(); toast(L.bd.created);
+  Object.assign(bd, { id: b.id, edit: true, page: 0, confirmDel: false }); location.hash = `#binder-${b.id}`;
+});
+document.addEventListener('click', (e) => {
+  const lay = e.target.closest('[data-bdlayout]');
+  if (lay) {   // changement de format : les cartes gardent leur ordre, les pages sont recalculées
+    const [cols, rows] = lay.dataset.bdlayout.split('x').map(Number);
+    binderEdit((b) => { const cards = b.slots; Object.assign(b, { cols, rows, size: cols * rows }); const n = Math.max(1, Math.ceil(cards.length / b.size)) * b.size; b.slots = Array.from({ length: n }, (_, k) => cards[k] ?? null); bd.page = 0; });
+    return;
+  }
+  if (e.target.id === 'picker') { closePicker(); return; }
+  const t = e.target.closest('[data-bd],[data-bslot],[data-bremove],[data-bfill],[data-pick]');
+  if (!t) return;
+  const d = t.dataset;
+  if (d.pick === 'close') { closePicker(); return; }
+  if (d.pick) { const slot = bd.pickSlot, cb = pickCb; closePicker(); if (cb) cb(d.pick); else binderEdit((b) => { b.slots[slot] = d.pick; }); return; }
+  if (d.bslot !== undefined) { openPicker(Number(d.bslot)); return; }
+  if (d.bremove !== undefined) { binderEdit((b) => { b.slots[Number(d.bremove)] = null; }); return; }
+  if (d.bfill) {
+    const ids = d.bfill === 'owned' ? [...catalog.cards, ...extras].filter((c) => qtyAll(c.id) > 0).sort(byNumber).map((c) => c.id) : setCards(d.bfill.slice(4)).map((c) => c.id);
+    binderEdit((b) => binderFill(b, ids)); return;
+  }
+  const act = d.bd;
+  if (!act) return;
+  if (act === 'prices') { user.prefs.bdPrices = user.prefs.bdPrices === 'off' ? 'on' : 'off'; save(); currentRender(); }
+  else if (act === 'edit') { bd.edit = !bd.edit; bd.confirmDel = false; currentRender(); }
+  else if (act === 'prev' || act === 'next') { const spread = isPC() ? 2 : 1; bd.page = Math.max(0, bd.page + (act === 'next' ? spread : -spread)); currentRender(); }
+  else if (act === 'addpage') binderEdit((b) => { for (let k = 0; k < b.size; k++) b.slots.push(null); bd.page = binderPages(b) - 1; });
+  else if (act === 'rename') { const b = user.binders.find((x) => x.id === location.hash.slice(8)); const n = b && prompt(L.bd.name, b.name); if (n && n.trim()) binderEdit((x) => { x.name = n.trim().slice(0, 40); }); }
+  else if (act === 'delete') {
+    if (!bd.confirmDel) { bd.confirmDel = true; currentRender(); return; }
+    const id = location.hash.slice(8);
+    user.binders = user.binders.filter((b) => b.id !== id); bd.confirmDel = false; gSave(); toast(L.bd.deleted); location.hash = '#binders';
+  }
+});
+document.addEventListener('input', (e) => { if (e.target.id === 'pickerQ') { bd.pickQ = e.target.value; pickerResults(); } });
+document.addEventListener('change', (e) => {
+  if (e.target.id !== 'bdFillList' || !e.target.value) return;
+  const d = allLists().find((x) => x.id === e.target.value);
+  if (d) binderEdit((b) => binderFill(b, listCards(d).map((c) => c.id)));
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !document.getElementById('picker')?.hidden && document.getElementById('picker')) closePicker(); });
+// glisser pour tourner les pages
+let bdSwipe = null;
+document.addEventListener('touchstart', (e) => { if (e.target.closest('#binderView') && e.touches.length === 1) bdSwipe = { x: e.touches[0].clientX, y: e.touches[0].clientY }; }, { passive: true });
+document.addEventListener('touchend', (e) => {
+  if (!bdSwipe) return;
+  const t = e.changedTouches[0], dx = t.clientX - bdSwipe.x, dy = t.clientY - bdSwipe.y;
+  bdSwipe = null;
+  if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx)) return;
+  document.querySelector(`[data-bd="${dx < 0 ? 'next' : 'prev'}"]:not([disabled])`)?.click();
+}, { passive: true });
+
+// ---------- Decks de la communauté et de tournoi (créateur de decks officiel, data/community-decks.json) ----------
+let community = null;
+const deckTab = () => (['mine', 'tourney', 'community'].includes(user.prefs.deckTab) ? user.prefs.deckTab : 'mine');
+async function communityLoad() {
+  if (community) return community;
+  try { community = await fetch('data/community-decks.json').then((r) => r.json()); } catch { community = { decks: [] }; }
+  return community;
+}
+function communityTile(dk) {
+  const ck = deckCheck({ ...dk, side: dk.side ?? {} }), val = deckValue(dk);
+  const legs = dk.legends.map((id) => cardsById.get(id));
+  return `<button class="deck-tile" data-cdeck="${esc(dk.id)}">
+    <span class="deck-legs">${[0, 1, 2].map((i) => (legs[i] ? `<img src="${esc(imageOf(canonOf(legs[i])) || placeholderArt(legs[i]))}" alt="" loading="lazy">` : '<span class="leg-empty"></span>')).join('')}</span>
+    <span class="deck-meta"><b>${esc(dk.name)}</b>
+      <span class="note num">${COLORS.filter((k) => ck.ram[k]).map(colorDot).join('')} ${L.cd.by(esc(dk.author || '?'))} · ♥ ${dk.likes} · 👁 ${dk.views}</span>
+      <span class="note num">${eur(val.v)}${val.miss ? ` · ${L.dk.missing(val.miss, eur(val.missCost))}` : ` · ${L.dk.complete}`}</span></span>
+  </button>`;
+}
+async function renderCommunityDecks(kind) {
+  const data = await communityLoad();
+  if (deckTab() !== kind || currentRender !== renderDecks) return;
+  const list = data.decks.filter((d) => d.kind === kind || (kind === 'community' && d.kind !== 'tourney'));
+  const box = document.getElementById('communityBox');
+  if (!box) return;
+  box.innerHTML = `<p class="note" style="margin:0">${kind === 'tourney' ? L.cd.tourneyHint : L.cd.communityHint}${data.updatedAt ? ` · ${L.cd.updated(fmt.date.format(new Date(data.updatedAt)))}` : ''}</p>
+    ${list.length ? `<div class="deck-list">${list.map(communityTile).join('')}</div>` : `<div class="empty"><strong>${L.cd.none}</strong></div>`}`;
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-cdeck],[data-decktab]');
+  if (!t) return;
+  if (t.dataset.decktab) { user.prefs.deckTab = t.dataset.decktab; save(); renderDecks(); return; }
+  const dk = community?.decks.find((x) => x.id === t.dataset.cdeck);
+  if (!dk) return;
+  previewDeck = { deck: { name: dk.name, legends: dk.legends, main: dk.main, side: dk.side }, by: dk.author ? `@${dk.author}` : '', code: '', back: '#decks', url: dk.url };
+  location.hash = '#deckview';
+});
+
+// ---------- Navigation ----------
+let currentTab = 'home';
+function markTabs() {
+  const pc = isPC();
+  for (const a of document.querySelectorAll('.tabbar a')) {
+    const on = a.dataset.tab === currentTab || (!pc && currentTab === 'sealed' && a.dataset.tab === 'home') || (!pc && currentTab === 'decks' && a.dataset.tab === 'collection');
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  }
+}
+function route() {
+  const h = location.hash.slice(1) || 'home';
+  if (!sheet.hidden) closeCard();
+  let tab = h;
+  if (h.startsWith('set-')) { tab = 'home'; currentRender = () => renderSet(h.slice(4)); }
+  else if (h === 'collection') currentRender = renderCollection;
+  else if (h === 'graded') { tab = 'collection'; currentRender = renderGraded; }
+  else if (h === 'leaderboard') { tab = 'collection'; lb.rows = null; currentRender = renderLeaderboard; }
+  else if (h === 'decks' && DECKS_ON) { tab = 'decks'; currentRender = renderDecks; }
+  else if (h.startsWith('deckcode-') && DECKS_ON) { tab = 'decks'; const code = h.slice(9); currentRender = () => openDeckCode(code); }
+  else if (h === 'deckview') { tab = 'decks'; currentRender = () => (previewDeck ? renderDeckPreview() : (location.hash = '#decks')); }
+  else if (h.startsWith('deck-') && DECKS_ON) { tab = 'decks'; const d = h.slice(5); currentRender = () => renderDeck(d); }
+  else if (h === 'wishlist') currentRender = renderWishlist;
+  else if (h === 'search') currentRender = renderSearch;
+  else if (h === 'values') currentRender = renderValues;
+  else if (h === 'sealed') { tab = 'sealed'; currentRender = renderSealed; }
+  else if (h === 'extra') { tab = 'home'; currentRender = renderExtra; }
+  else if (h === 'lists') { tab = 'home'; currentRender = renderLists; }
+  else if (h.startsWith('list-')) { tab = 'home'; const id = h.slice(5); currentRender = () => renderList(id); }
+  else if (h === 'binders') { tab = 'collection'; currentRender = renderBinders; }
+  else if (h.startsWith('binder-')) { tab = 'collection'; const id = h.slice(7); if (bd.id !== id) Object.assign(bd, { id, page: 0, edit: bd.edit && bd.id === id, confirmDel: false }); currentRender = () => renderBinder(id); }
+  else if (h === 'news') { tab = 'home'; currentRender = renderNews; }
+  else if (h.startsWith('buy-')) { const src = h.slice(4); tab = src.startsWith('wish') ? 'wishlist' : src.startsWith('deck') ? 'decks' : 'home'; currentRender = () => renderBuy(src); }
+  else if (h === 'friends') { fr.view = null; fr.msg = ''; currentRender = renderFriends; }
+  else if (h.startsWith('friend-')) { tab = 'friends'; const uid = h.slice(7); if (fr.view?.uid !== uid) fr.filter = 'all'; renderFriendCurrent = () => renderFriend(uid); currentRender = renderFriendCurrent; }
+  else { tab = 'home'; currentRender = renderHome; }
+  currentTab = tab;
+  markTabs();
+  currentRender();
+  window.scrollTo(0, 0);
+  if (h === 'search') document.getElementById('cardSearch')?.focus();
+  petEvent('route');
+}
+window.addEventListener('hashchange', route);
+
+// ---------- Capri compagnon : elle se balade dans l'appli, s'assoit sur les cartes et les commente ----------
+// Dessin original (fan art vectoriel), animé en CSS ; déplacements en JS. Désactivable dans les Réglages.
+// Images de Capri : une par posture si disponible (data/pet.json), sinon l'image de base.
+// Aucun dessin : uniquement des images fournies par le propriétaire de l'appli.
+const PET_DEFAULT = 'images/capri/portrait.webp';
+let petSprites = { idle: PET_DEFAULT };
+const petSprite = (st) => petSprites[st] ?? petSprites[{ game: 'sit', sleep: 'sit', jump: 'idle', drag: 'idle', wave: 'idle', walk: 'idle' }[st]] ?? petSprites.idle ?? PET_DEFAULT;
+
+const PET_LINES = {
+  fr: {
+    strong: ['Elle est trop forte celle-ci !', 'Wow… {name}. Je suis jalouse.', 'Ça brille de partout, j\'adore !', 'Celle-là, c\'est du nova pur.'],
+    pricey: ['{price} ?! Elle vaut une fortune, choom.', 'Avec {price}, on se paie un implant, tu sais.'],
+    mid: ['Jolie cote : {price}.', 'Pas donnée, celle-ci… {price}.'],
+    owned: ['Tu l\'as déjà, preem !', 'Celle-là est à toi. Je la surveille.'],
+    wishlist: ['Elle est dans tes souhaits… bientôt à toi.', 'Je croise mes engrammes pour que tu l\'aies.'],
+    Legend: ['Une Légende ! J\'adore les légendes.', 'Les Légendes, c\'est tout à fait mon genre.'],
+    Program: ['Un Programme ! Ça, ça me parle.', 'Laisse-moi lire son code… *bzzt*'],
+    Gear: ['Du matos ! Ça claque.', 'Je l\'équiperais bien… si j\'avais un vrai corps.'],
+    Unit: ['J\'aime trop cette carte !', 'Elle a du style, celle-là.', 'Pas mal du tout, celle-ci.'],
+    cheap: ['Une petite commune… mais je l\'aime quand même.', 'Petite carte, grand cœur.'],
+    smasher: ['Adam Smasher… brr, je garde mes distances.'],
+    johnny: ['Johnny Silverhand… toujours trop bruyant, celui-là.'],
+    crew: ['Une figure d\'Edgerunners ! Respect.'],
+    arasaka: ['Arasaka… ne me parle pas d\'eux.'],
+    v: ['V ! Une légende de Night City.'],
+    booster: ['Un booster ! On l\'ouvre ? Allez !'], box: ['Une booster box entière… tu me fais rêver.'], case: ['Six booster box ?! Tu vises le nova total.'], deck: ['Un deck tout prêt, parfait pour jouer.'], kit: ['Un kit ! Ça sent la nouveauté.'],
+    ownAdded: ['Nova, une de plus dans la collection !', 'Ajoutée ! Ta collection grossit, choom.'],
+    ownRemoved: ['Oh… elle s\'en va ?'],
+    wishAdded: ['Bon choix. Je la voulais aussi.'],
+    idle: ['Night City ne dort jamais… moi non plus.', 'Tu as vu les cotes aujourd\'hui ?', 'Je me promène dans tes cartes, ça te dérange pas ?', '*bzzt* … pardon, petit glitch.', 'J\'aime bien ici. C\'est calme, pour un réseau.'],
+    tap: ['Hé ! Ça chatouille.', 'Oui, oui, je suis là.', 'Touche-moi deux fois pour discuter !'],
+    game: ['Laisse-moi finir ma partie…', 'Nouveau record ! Enfin presque.'],
+    drag: ['Waaah ! Pose-moi !'],
+    wake: ['Hein ? Je dormais pas, je défragmentais.'],
+  },
+  en: {
+    strong: ['This one is so strong!', 'Wow… {name}. I\'m jealous.', 'It sparkles everywhere, I love it!', 'Pure nova, that one.'],
+    pricey: ['{price}?! That\'s a fortune, choom.', 'With {price} you could buy an implant.'],
+    mid: ['Nice price: {price}.', 'Not cheap… {price}.'],
+    owned: ['You already have it, preem!', 'That one is yours. I\'m keeping an eye on it.'],
+    wishlist: ['It\'s on your wishlist… soon yours.', 'Crossing my engrams for you.'],
+    Legend: ['A Legend! I love Legends.', 'Legends are totally my type.'],
+    Program: ['A Program! Now we\'re talking.', 'Let me read its code… *bzzt*'],
+    Gear: ['Gear! Looks great.', 'I\'d equip it… if I had a real body.'],
+    Unit: ['I love this card!', 'This one has style.', 'Not bad at all.'],
+    cheap: ['Just a common… but I still love it.', 'Small card, big heart.'],
+    smasher: ['Adam Smasher… brr, I keep my distance.'],
+    johnny: ['Johnny Silverhand… always too loud.'],
+    crew: ['An Edgerunners legend! Respect.'],
+    arasaka: ['Arasaka… don\'t talk to me about them.'],
+    v: ['V! A Night City legend.'],
+    booster: ['A booster! Shall we open it?'], box: ['A whole booster box… dreamy.'], case: ['Six booster boxes?! Going full nova.'], deck: ['A ready-made deck, perfect to play.'], kit: ['A kit! Smells brand new.'],
+    ownAdded: ['Nova, one more in the collection!', 'Added! Your collection is growing, choom.'],
+    ownRemoved: ['Oh… it\'s leaving?'],
+    wishAdded: ['Good pick. I wanted it too.'],
+    idle: ['Night City never sleeps… neither do I.', 'Seen the prices today?', 'Mind if I walk around your cards?', '*bzzt* … sorry, tiny glitch.', 'I like it here. Quiet, for a network.'],
+    tap: ['Hey! That tickles.', 'Yes, yes, I\'m here.', 'Tap me twice to chat!'],
+    game: ['Let me finish my game…', 'New high score! Almost.'],
+    drag: ['Waaah! Put me down!'],
+    wake: ['Huh? I wasn\'t sleeping, I was defragmenting.'],
+  },
+};
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
+const STRONG = { has: (r) => rarityTier(r) >= 3 };
+function petCardLine(c) {
+  const T = PET_LINES[lang];
+  const fill = (s) => s.replace('{name}', cardName(c)).replace('{price}', eur(price(c.id)));
+  if (isSealed(c)) return pick(T[c.category] ?? T.idle);
+  const n = `${c.nameEn ?? ''} ${c.name ?? ''}`;
+  const pool = [];
+  if (/Adam Smasher/i.test(n)) pool.push(...T.smasher);
+  if (/Johnny Silverhand/i.test(n)) pool.push(...T.johnny);
+  if (/\b(Lucyna|Lucy|Rebecca|David Martinez|Maine|Kiwi|Dorio|Pilar|Falco)\b/i.test(n)) pool.push(...T.crew);
+  if (/Arasaka/i.test(n)) pool.push(...T.arasaka);
+  if (/^V\b|\bV —/.test(c.nameEn ?? '')) pool.push(...T.v);
+  const p = price(c.id) ?? 0;
+  if (STRONG.has(c.rarity)) pool.push(...T.strong);
+  if (p >= 30) pool.push(...T.pricey); else if (p >= 5) pool.push(...T.mid);
+  if (qty(c.id) > 0) pool.push(...T.owned); else if (wish.has(c.id)) pool.push(...T.wishlist);
+  if (!pool.length) pool.push(...(c.rarity === 'Common' && p < 0.2 ? T.cheap : []), ...(T[c.type] ?? T.Unit));
+  return fill(pick(pool));
+}
+
+const pet = { el: null, bubble: null, x: 0, y: 0, mode: 'stand', facing: 1, anchor: null, anchorDX: 0, raf: 0, think: 0, talkT: 0, lastTalk: 0, lastAct: Date.now(), sleeping: false, drag: null, tapT: 0, on: false };
+const petReduce = matchMedia('(prefers-reduced-motion: reduce)');
+const petSize = () => (isPC() ? 104 : 78);                 // hauteur en px
+const petK = () => 1;
+const petW = () => Math.round(petSize() * (pet.aspect || 1));
+// point posé sur la surface : le bas de l'image (debout) ou un peu au-dessus (assise : elle chevauche le bord)
+const petAnchor = (mode) => (mode === 'sit' ? petSize() * 0.86 : petSize());
+function petGround() {
+  if (isPC()) return innerHeight - 4;
+  const tb = document.querySelector('.tabbar');
+  return (tb ? tb.getBoundingClientRect().top : innerHeight) - 2;
+}
+function petRender() {
+  if (!pet.el) return;
+  const top = pet.y - petAnchor(pet.mode);
+  pet.el.style.width = `${petW()}px`; pet.el.style.height = `${petSize()}px`;
+  pet.el.style.transform = `translate3d(${Math.round(pet.x - petW() / 2)}px, ${Math.round(top)}px, 0)`;
+  pet.el.classList.toggle('left', pet.facing < 0);
+  petPlaceBubble();
+}
+function petState(s) {
+  if (!pet.el) return;
+  pet.el.dataset.state = s;
+  const src = petSprite(s);
+  if (pet.img && !pet.img.src.endsWith(src)) pet.img.src = src;
+}
+function petStop() { cancelAnimationFrame(pet.raf); pet.raf = 0; }
+const clampX = (x) => Math.max(petW() / 2 + 4, Math.min(innerWidth - petW() / 2 - 4, x));
+
+function petWalkTo(tx, done) {
+  petStop();
+  tx = clampX(tx);
+  pet.anchor = null; pet.mode = 'stand'; pet.y = petGround();
+  if (petReduce.matches) { pet.x = tx; petRender(); petState('idle'); done?.(); return; }
+  pet.facing = tx >= pet.x ? 1 : -1;
+  petState('walk');
+  let last = performance.now();
+  const speed = isPC() ? 70 : 55;
+  const step = (t) => {
+    const dt = Math.min(0.05, (t - last) / 1000); last = t;
+    const d = tx - pet.x;
+    if (Math.abs(d) <= speed * dt) { pet.x = tx; petRender(); pet.raf = 0; petState('idle'); done?.(); return; }
+    pet.x += Math.sign(d) * speed * dt; pet.y = petGround(); petRender();
+    pet.raf = requestAnimationFrame(step);
+  };
+  pet.raf = requestAnimationFrame(step);
+}
+function petHop(tx, ty, mode, done) {
+  petStop();
+  const x0 = pet.x, y0 = pet.y;
+  // le point d'ancrage change entre debout et assise : on compense pour un saut continu
+  const off = petAnchor('stand') - petAnchor('sit');
+  const yFrom = pet.mode === 'sit' ? y0 : y0 - off, yTo = mode === 'sit' ? ty : ty - off;
+  pet.facing = tx >= x0 ? 1 : -1;
+  if (petReduce.matches) { pet.x = tx; pet.y = ty; pet.mode = mode; petRender(); done?.(); return; }
+  petState('jump'); pet.mode = 'sit';
+  const t0 = performance.now(), dur = 520;
+  const step = (t) => {
+    const u = Math.min(1, (t - t0) / dur);
+    pet.x = x0 + (tx - x0) * u;
+    pet.y = yFrom + (yTo - yFrom) * u - Math.sin(Math.PI * u) * 70;
+    petRender();
+    if (u < 1) pet.raf = requestAnimationFrame(step);
+    else { pet.raf = 0; pet.mode = mode; pet.y = ty; petRender(); done?.(); }
+  };
+  pet.raf = requestAnimationFrame(step);
+}
+function petFall() {
+  pet.anchor = null;
+  petHop(clampX(pet.x), petGround(), 'stand', () => petState('idle'));
+}
+// s'asseoir sur le bord haut d'un élément (carte, produit, image de la fiche)
+// téléportation façon Capri : disparaît dans un glitch et réapparaît à destination
+function petTeleport(tx, ty, done) {
+  petStop();
+  pet.el.classList.add('tp');
+  setTimeout(() => {
+    pet.x = tx; pet.y = ty; pet.mode = 'sit'; petRender();
+    pet.el.classList.remove('tp'); pet.el.classList.add('tp-in');
+    setTimeout(() => pet.el.classList.remove('tp-in'), 360);
+    done?.();
+  }, petReduce.matches ? 0 : 200);
+}
+function petSitOn(target, line, opts = {}) {
+  const r = target.getBoundingClientRect();
+  const tx = clampX(r.left + r.width * (0.35 + Math.random() * 0.3));
+  const ty = Math.max(petAnchor('sit') + 6, r.top + 2);
+  const settle = () => {
+    pet.anchor = target; pet.anchorDX = pet.x - r.left;
+    petState(Math.random() < 0.18 && isPC() ? 'game' : 'sit');
+    if (line) petSay(line, 3800, opts.force);
+  };
+  if (opts.teleport) petTeleport(tx, ty, settle);
+  else if (pet.anchor || petReduce.matches || Math.abs(tx - pet.x) < 40) petHop(tx, ty, 'sit', settle);
+  else petWalkTo(tx, () => { const r2 = target.getBoundingClientRect(); if (!target.isConnected || r2.bottom < 0) return; petHop(tx, Math.max(petAnchor('sit') + 6, r2.top + 2), 'sit', settle); });
+}
+function petFollowAnchor() {
+  if (!pet.on || pet.raf || pet.drag) return;
+  if (pet.anchor) {
+    const r = pet.anchor.getBoundingClientRect();
+    if (!pet.anchor.isConnected || r.bottom < 40 || r.top > petGround() - 30 || r.width === 0) { petFall(); return; }
+    pet.x = r.left + pet.anchorDX; pet.y = Math.max(petAnchor('sit') + 6, r.top + 2);
+  } else if (pet.mode === 'stand') pet.y = petGround();
+  pet.x = clampX(pet.x);
+  petRender();
+}
+
+function petSay(text, ms = 3800, force) {
+  if (!pet.el || !text) return;
+  const now = Date.now();
+  if (!force && now - pet.lastTalk < 2500) return;
+  pet.lastTalk = now;
+  pet.bubble.textContent = text.replace(/\*([^*]+)\*/g, '$1');
+  pet.bubble.hidden = false;
+  pet.el.classList.add('talking');
+  petPlaceBubble();
+  clearTimeout(pet.talkT);
+  pet.talkT = setTimeout(() => { pet.bubble.hidden = true; pet.el.classList.remove('talking'); }, ms);
+}
+function petPlaceBubble() {
+  if (!pet.bubble || pet.bubble.hidden) return;
+  const right = pet.x > innerWidth - 150, left = pet.x < 150;
+  pet.bubble.classList.toggle('below', pet.y - petAnchor(pet.mode) < 90);   // trop près du haut : bulle en dessous
+  pet.bubble.classList.toggle('to-left', right && !left);
+  pet.bubble.classList.toggle('to-right', left);
+}
+
+function petVisibleTiles() {
+  const ground = petGround();
+  return [...document.querySelectorAll('#view .card, #view .sealed')].filter((el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 50 && r.top > 120 && r.top < ground - 120 && r.left > 0 && r.right < innerWidth;
+  });
+}
+function petThink() {
+  clearTimeout(pet.think);
+  pet.think = setTimeout(petThink, 5000 + Math.random() * 6000);
+  if (!pet.on || pet.drag || pet.raf || document.hidden || !sheet.hidden) return;
+  const idleFor = Date.now() - pet.lastAct;
+  if (idleFor > 70000) {
+    if (!pet.sleeping) { pet.sleeping = true; if (!pet.anchor) { pet.mode = 'stand'; pet.y = petGround(); } petState('sleep'); petRender(); petSay('Zzz…', 6000, true); }
+    return;
+  }
+  const r = Math.random();
+  const tiles = petVisibleTiles();
+  if (r < 0.32 && tiles.length) {
+    const el = pick(tiles);
+    const c = cardsById.get(el.dataset.cid);
+    petSitOn(el, c && Math.random() < 0.85 ? petCardLine(c) : null);
+  } else if (r < 0.62) {
+    if (pet.anchor) petFall();
+    else petWalkTo(40 + Math.random() * (innerWidth - 80));
+  } else if (r < 0.72) {
+    petState(pet.anchor ? 'sit' : 'wave'); petSay(pick(PET_LINES[lang].idle));
+  } else if (r < 0.8 && !pet.anchor) {
+    pet.mode = 'stand'; pet.y = petGround(); petRender(); petState('game');
+    if (Math.random() < 0.5) petSay(pick(PET_LINES[lang].game));
+  } else if (!pet.anchor) { pet.mode = 'stand'; pet.y = petGround(); petRender(); petState('idle'); }
+}
+function petWake() {
+  pet.lastAct = Date.now();
+  if (pet.sleeping) { pet.sleeping = false; petState(pet.anchor ? 'sit' : 'idle'); if (!pet.anchor) { pet.mode = 'stand'; pet.y = petGround(); petRender(); } if (Math.random() < 0.6) petSay(pick(PET_LINES[lang].wake)); }
+}
+
+// réactions aux actions de l'appli
+function petEvent(type, data) {
+  if (type === 'route') { petSync(); return; }
+  if (!pet.on || !pet.el) return;
+  if (type === 'open') {
+    const img = sheetPanel.querySelector('.detail .card-img');
+    const same = pet.lastOpen?.id === data.id && Date.now() - pet.lastOpen.t < 15000;
+    pet.lastOpen = { id: data.id, t: Date.now() };
+    if (same && pet.anchor) { pet.anchor = img; petFollowAnchor(); return; }  // même carte (ex. + / −) : elle reste en place
+    setTimeout(() => { if (img?.isConnected) petSitOn(img, petCardLine(data), { teleport: true, force: true }); }, 200);
+  } else if (type === 'close') {
+    if (pet.anchor && !pet.anchor.closest('#view')) petFall();
+  } else if (type === 'own') petSay(pick(PET_LINES[lang][data.on ? 'ownAdded' : 'ownRemoved']), 3000, true);
+  else if (type === 'wish' && data.on) petSay(pick(PET_LINES[lang].wishAdded), 3000, true);
+  else if (type === 'route') petSync();
+  else if (type === 'sheet') pet.el.parentElement.hidden = true;   // réglages, compte : elle s'écarte
+  if (type === 'close') pet.el.parentElement.hidden = !pet.on;
+}
+// Capri renvoyée (appui long sur téléphone, × sur PC) : cachée jusqu'à la prochaine ouverture de l'appli
+let petDismissed = false;
+try { petDismissed = sessionStorage.getItem('weissdex:petHidden') === '1'; } catch { /* stockage indisponible */ }
+function petDismiss() {
+  if (!pet.el || petDismissed) return;
+  petDismissed = true;
+  try { sessionStorage.setItem('weissdex:petHidden', '1'); } catch { /* stockage indisponible */ }
+  pet.drag = null; petStop(); clearTimeout(pet.think);
+  petSay(L.petBye, 1200, true);
+  setTimeout(() => {
+    pet.el.classList.add('tp');
+    setTimeout(() => { pet.el.classList.remove('tp'); petSync(); toast(L.petHidden); }, 260);
+  }, 700);
+}
+function petSync() {
+  if (!PET_ON) return;
+  const want = user.prefs.pet !== 'off' && !petDismissed && currentRender !== renderCapri && !!catalog.cards.length;
+  if (!pet.el) {
+    if (!want) return;
+    const layer = document.createElement('div');
+    layer.className = 'pet-layer';
+    layer.innerHTML = `<div class="pet" data-state="idle" role="button" tabindex="0" aria-label="Capri"><div class="pet-bubble" hidden></div><img class="pet-img" src="${petSprite('idle')}" alt="" draggable="false"><button class="pet-close" type="button" aria-label="${L.petHide}" title="${L.petHide}">×</button></div>`;
+    document.body.appendChild(layer);
+    pet.el = layer.firstElementChild; pet.bubble = pet.el.querySelector('.pet-bubble'); pet.img = pet.el.querySelector('.pet-img');
+    pet.img.addEventListener('load', () => { const a = pet.img.naturalWidth / pet.img.naturalHeight; if (a && Math.abs(a - (pet.aspect || 1)) > 0.01) { pet.aspect = a; petRender(); } });
+    // images par posture et fond transparent ou non : data/pet.json (facultatif)
+    fetch('data/pet.json', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).then((cfg) => {
+      if (!cfg) return;
+      if (cfg.sprites) petSprites = { ...petSprites, ...cfg.sprites };
+      pet.el.classList.toggle('framed', !cfg.transparent);
+      petState(pet.el.dataset.state);
+    }).catch(() => {});
+    pet.x = innerWidth - 70; pet.y = petGround(); pet.mode = 'stand';
+    petBind();
+  }
+  pet.on = want;
+  pet.el.parentElement.hidden = !want;
+  if (!want) { petStop(); clearTimeout(pet.think); return; }
+  if (pet.anchor && !pet.anchor.isConnected) { pet.anchor = null; pet.mode = 'stand'; pet.y = petGround(); petState('idle'); }
+  petRender();
+  if (!pet.think) petThink();
+}
+function petBind() {
+  const el = pet.el;
+  el.querySelector('.pet-close').addEventListener('pointerdown', (e) => e.stopPropagation());
+  el.querySelector('.pet-close').addEventListener('click', (e) => { e.stopPropagation(); petDismiss(); });
+  el.addEventListener('contextmenu', (e) => e.preventDefault());   // pas de menu « enregistrer l'image » à l'appui long
+  el.addEventListener('pointerdown', (e) => {
+    petWake();
+    pet.drag = { sx: e.clientX, sy: e.clientY, moved: false, id: e.pointerId };
+    try { el.setPointerCapture(e.pointerId); } catch { /* pointeur déjà relâché */ }
+    // appui long (doigt immobile) : Capri s'en va
+    clearTimeout(pet.pressT);
+    if (e.pointerType !== 'mouse') pet.pressT = setTimeout(() => { if (pet.drag && !pet.drag.moved) { pet.drag = null; navigator.vibrate?.(30); petDismiss(); } }, 600);
+  });
+  el.addEventListener('pointermove', (e) => {
+    const d = pet.drag;
+    if (!d) return;
+    if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 8) return;
+    if (!d.moved) { clearTimeout(pet.pressT); d.moved = true; petStop(); pet.anchor = null; pet.mode = 'sit'; petState('drag'); petSay(pick(PET_LINES[lang].drag), 2000, true); }
+    pet.x = clampX(e.clientX); pet.y = e.clientY + 30; petRender();
+  });
+  const end = (e) => {
+    clearTimeout(pet.pressT);
+    const d = pet.drag;
+    pet.drag = null;
+    if (!d) return;
+    if (d.moved) {
+      // lâchée au-dessus d'une carte : elle s'y assoit ; sinon elle retombe
+      el.style.pointerEvents = 'none';
+      const under = document.elementFromPoint(e.clientX, e.clientY + 60)?.closest('#view .card, #view .sealed, .detail .card-img');
+      el.style.pointerEvents = '';
+      if (under) { const c = cardsById.get(under.closest('[data-cid]')?.dataset.cid ?? openId); petSitOn(under, c ? petCardLine(c) : null, { force: true }); }
+      else petFall();
+      return;
+    }
+    const now = Date.now();
+    if (now - pet.tapT < 380) { location.hash = '#capri'; return; } // double tap : ouvrir le chat
+    pet.tapT = now;
+    if (!pet.anchor && pet.mode === 'stand') petState('wave');
+    petSay(pick(PET_LINES[lang].tap), 2600, true);
+    setTimeout(() => { if (pet.el.dataset.state === 'wave') petState('idle'); }, 1600);
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', () => { pet.drag = null; petFall(); });
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter') location.hash = '#capri'; else if (e.key === 'Delete' || e.key === 'Backspace') petDismiss(); });
+  addEventListener('scroll', petFollowAnchor, { passive: true });
+  sheetPanel.addEventListener('scroll', petFollowAnchor, { passive: true });
+  addEventListener('resize', () => { if (!pet.anchor && !pet.raf) { pet.y = petGround(); pet.x = clampX(pet.x); petRender(); } else petFollowAnchor(); });
+  for (const ev of ['pointerdown', 'keydown', 'scroll', 'wheel']) addEventListener(ev, petWake, { passive: true, capture: true });
+  // repasse en idle après un geste « wave » ou un saut
+  setInterval(() => { if (pet.on && !pet.raf && !pet.drag && pet.el.dataset.state === 'wave' && Date.now() - pet.lastTalk > 3000) petState('idle'); }, 1500);
+}
+
+// ---------- Démarrage ----------
+pcQuery.addEventListener('change', () => {
+  applyDevice(); markTabs(); currentRender(); petSync();
+  if (openId) openCard(openId, true);
+});
+renderChrome();
+try {
+  await loadData();
+  setTimeout(alertsCheck, 800);
+  if (user.prefs.ownV !== 2) { migrateOwned(user.owned); user.prefs.ownV = 2; save(); }
+  route();
+  initCloud();
+} catch (err) {
+  view.innerHTML = `<div class="empty"><strong>${L.loadError}</strong>${L.loadErrorHint}</div>`;
+  console.error(err);
+}
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
