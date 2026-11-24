@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8455a"/><stop offset="1" stop-color="#f2b53a"/></linearGradient>
+    <radialGradient id="glow" cx=".5" cy=".42" r=".55"><stop offset="0" stop-color="#2a1d24"/><stop offset="1" stop-color="#0d0d11"/></radialGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#glow)"/>
+  <circle cx="256" cy="256" r="200" fill="none" stroke="url(#g)" stroke-width="6" opacity=".55"/>
+  <g fill="url(#g)">
+    <!-- pétale central -->
+    <path d="M256 92C296 142 314 204 296 262L256 304L216 262C198 204 216 142 256 92Z"/>
+    <!-- pétales latéraux (droite, puis copie en miroir) -->
+    <path id="side" d="M266 306C292 240 352 200 398 222C438 242 436 302 398 312C372 319 356 298 368 282C376 272 392 276 392 288C404 268 392 248 372 248C332 248 300 286 286 334Z"/>
+    <use href="#side" transform="translate(512 0) scale(-1 1)"/>
+    <!-- bande -->
+    <rect x="184" y="300" width="144" height="34" rx="10"/>
+    <!-- pied -->
+    <path d="M256 334C266 370 296 382 330 392C300 404 272 398 256 378C240 398 212 404 182 392C216 382 246 370 256 334Z"/>
+    <path d="M244 334H268L262 418Q256 432 250 418Z"/>
+  </g>
+</svg>

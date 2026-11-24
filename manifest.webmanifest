@@ -10,16 +10,20 @@
   "theme_color": "#0d0d11",
   "icons": [
     {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
       "src": "icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
+      "type": "image/png"
     },
     {
       "src": "icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "any maskable"
     }
   ],
   "description": "Suivi de collection Weiss Schwarz (EN, JP) : cartes, prix Cardmarket, classeurs et amis.",
