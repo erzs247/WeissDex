@@ -48,6 +48,10 @@ jobs:
               echo "- $(curl -s -o /dev/null -w '%{http_code} %{content_type} %{size_download} octets' -H 'Referer: https://erzs247.github.io/' "$u") : $u"
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Images manquantes (nouvelles séries + cartes encore sans image)
+        continue-on-error: true
+        timeout-minutes: 30
+        run: node scripts/check-images.mjs --minutes 20
       - name: Enregistrer les nouveautés
         run: |
           git config user.name "weissdex-bot"

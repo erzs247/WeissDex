@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       series:
-        description: "Début du code des séries à vérifier (ex. Ffp) ; vide = échantillon de toute la base"
+        description: "Début du code des séries à vérifier (ex. Ffp) ; vide = séries pas encore vérifiées"
         type: string
         default: ""
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verifier:
@@ -22,4 +22,11 @@ jobs:
           node-version: 22
       - name: Images des cartes
         run: |
-          if [ -n "${{ inputs.series }}" ]; then node scripts/check-images.mjs --sets "${{ inputs.series }}"; else node scripts/check-images.mjs --sample 6; fi
+          if [ -n "${{ inputs.series }}" ]; then node scripts/check-images.mjs --sets "${{ inputs.series }}"; else node scripts/check-images.mjs --minutes 45; fi
+      - name: Enregistrer
+        run: |
+          git config user.name "weissdex-bot"
+          git config user.email "weissdex-bot@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "Images vérifiées le $(date +%F)"
+          git pull --rebase origin main && git push

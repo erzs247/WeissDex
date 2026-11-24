@@ -114,6 +114,11 @@ for (const [code, list] of bySet) {
   }
 }
 
+// images absentes du site officiel (relevées par check-images.mjs) : l'appli affiche directement l'image de secours
+const checkPath = join(root, 'data/image-check.json');
+const imgBad = existsSync(checkPath) ? JSON.parse(readFileSync(checkPath, 'utf8')).bad ?? {} : {};
+for (const c of cards) if (imgBad[c.id]) c.noimg = 1;
+
 // ---------- 3. Cardmarket : liste publique des produits Weiss Schwarz ----------
 const idGame = config.cardmarket.idGame;
 let products = [];

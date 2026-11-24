@@ -1076,10 +1076,12 @@ function animeList() {
   }
   return [...map.values()].sort((x, y) => y.order - x.order);
 }
+// illustration d'un animé : sa série la plus récente qui a des images (une promo pas encore illustrée est sautée)
+const animeArtSet = (a) => a.sets.find((s) => setArt(s.code)) ?? a.sets[0];
 const animeProgress = (a) => { let own = 0, total = 0; for (const s of a.sets) { own += ownedIn(s.code); total += setTotal(s); } return { own, total, p: total ? own / total : 0 }; };
 function animeTile(a) {
   const { own, total, p } = animeProgress(a);
-  return `<a class="anime-tile ${p >= 1 ? 'done' : ''}" href="#anime-${esc(a.block)}" ${artStyle(a.sets[0].code)}>
+  return `<a class="anime-tile ${p >= 1 ? 'done' : ''}" href="#anime-${esc(a.block)}" ${artStyle(animeArtSet(a).code)}>
     ${fav.has(`anime:${a.block}`) ? `<span class="fav-dot">${I.star}</span>` : ''}
     <strong>${esc(a.name)}</strong>
     <span class="anime-meta num"><span>${L.an.sets(a.sets.length)}</span><span><b>${own}</b>/${total}</span></span>
@@ -1088,7 +1090,7 @@ function animeTile(a) {
 }
 function animeRow(a) {
   const { own, total, p } = animeProgress(a);
-  return `<a class="set-row ${p >= 1 ? 'done' : ''}" href="#anime-${esc(a.block)}" ${artStyle(a.sets[0].code)}>
+  return `<a class="set-row ${p >= 1 ? 'done' : ''}" href="#anime-${esc(a.block)}" ${artStyle(animeArtSet(a).code)}>
     <div class="set-head"><span class="anime-count num">${L.an.sets(a.sets.length)}</span><span class="set-name">${esc(a.name)}</span>
     <span class="set-count num">${own}<small>/${total}</small><b>${Math.floor(p * 100)} %</b></span></div>
     <div class="bar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>
@@ -1135,7 +1137,7 @@ function renderAnime(block) {
   const lic = allLists().filter((x) => x.group === 'licence' && blocks.has(x.lic) && cardsLen(x));
   if (animeTab === 'chars' && !chars.length) animeTab = 'sets';
   view.innerHTML = `<div class="stack">
-    <div class="set-hero" ${artStyle(a.sets[0].code)}>
+    <div class="set-hero" ${artStyle(animeArtSet(a).code)}>
       <div class="set-hero-text"><span class="title-code">${L.an.one}</span><h2>${esc(a.name)}</h2><small>${L.an.sets(a.sets.length)} · ${L.an.cards(total)}</small></div>
       <div class="set-hero-prog num"><b>${Math.floor(p * 100)} %</b><span>${own}/${total}</span></div>
       <div class="bar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>
