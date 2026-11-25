@@ -9,7 +9,7 @@ service cloud.firestore {
     function isFriendOf(owner) { return signedIn() && exists(/databases/$(database)/documents/friends/$(owner)/list/$(request.auth.uid)); }
     // administrateurs de WeissDex (gèrent les soutiens depuis l'appli) : ajouter ici ton ID WeissDex (Mon compte → Ton ID),
     // le même que dans data/config.json → "admins"
-    function isAdmin() { return signedIn() && request.auth.uid in []; }
+    function isAdmin() { return signedIn() && request.auth.uid in ['Wyr6jN0XWQgLQwsJ82E1IhPSbDW2']; }
 
     // collection de chaque compte : écrite par son propriétaire, lue par lui et ses amis acceptés
     match /users/{uid} {

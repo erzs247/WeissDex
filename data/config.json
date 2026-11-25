@@ -20,7 +20,9 @@
       "ja": 7
     }
   },
-  "admins": [],
+  "admins": [
+    "Wyr6jN0XWQgLQwsJ82E1IhPSbDW2"
+  ],
   "cardBacks": {
     "normal": "icons/card-back.jpg"
   }
