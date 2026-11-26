@@ -41,19 +41,23 @@ for (const start of [`${BASE}/products/`, `${BASE}/products/products-archive/`])
     if (slugs.size === before) break; // plus de nouveaux produits : fin de la pagination
   }
 }
+for (const o of Object.values(off.products)) if (o.image && /mockup|NOWPRINTING|now_printing|comingsoon/i.test(o.image)) { o.image = null; o.retry = true; }
 let fresh = 0;
 for (const slug of slugs) {
-  if (off.products[slug] || Date.now() > stopAt) continue;
+  // produits à venir (image « bientôt disponible ») : page relue jusqu'à l'image définitive
+  if ((off.products[slug] && !off.products[slug].retry) || Date.now() > stopAt) continue;
   const html = await get(`${BASE}/products/${slug}/`);
   if (!html) continue;
   const main = html.slice(html.indexOf('<main'));
   const img = main.match(/p-products__item-thumbnail[\s\S]*?<img[^>]+src="([^"]+)"/)?.[1];
   const date = decode(main.match(/<dt>Release<\/dt>\s*<dd>([\s\S]*?)<\/dd>/)?.[1]);
   const prefixes = [...new Set([...main.matchAll(/「([A-Za-z0-9]+)\/」/g)].map((m) => m[1]))];
+  const isPlaceholder = !!img && /mockup|NOWPRINTING|now_printing|comingsoon/i.test(img);
   off.products[slug] = {
     slug, title: decode(main.match(/<p class="p-products__ttl">([\s\S]*?)<\/p>/)?.[1]),
     category: decode(main.match(/<p class="p-products__category">([\s\S]*?)<\/p>/)?.[1]),
-    image: img ? new URL(img, BASE).href : null, release: Date.parse(date) ? new Date(Date.parse(date) + 12 * 3600e3).toISOString().slice(0, 10) : null, prefixes,
+    // image générique « bientôt disponible » (produit à venir) : pas d'image, l'appli affiche le nom du produit
+    image: img && !isPlaceholder ? new URL(img, BASE).href : null, ...(isPlaceholder ? { retry: true } : {}), release: Date.parse(date) ? new Date(Date.parse(date) + 12 * 3600e3).toISOString().slice(0, 10) : null, prefixes,
   };
   fresh++;
 }
