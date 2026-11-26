@@ -44,6 +44,8 @@ const catalog = readJson('data/catalog.json');
 // cartes : un fichier par édition (data/cards-en.json, data/cards-ja.json)
 const files = (catalog.split ?? []).map((l) => [l, readJson(`data/cards-${l}.json`)]);
 const allCards = files.flatMap(([, f]) => f.cards);
+// produits scellés (data/sealed.json, fait par import-sealed.mjs) : même relevé, historique dans le fichier de leur série
+const sealedItems = existsSync(join(root, 'data/sealed.json')) ? readJson('data/sealed.json').items ?? [] : [];
 let guide = null;
 try {
   const file = await loadGuide();
@@ -85,7 +87,7 @@ const histOf = (set) => {
 
 const prices = {};
 let priced = 0;
-for (const c of allCards) {
+for (const c of [...allCards, ...sealedItems]) {
   const g = guide?.get(c.cardmarket?.idProduct);
   if (!g) continue;
   const holoOnly = !num(g.trend) && !num(g.avg) && !!rev(g, 'trend');
@@ -96,7 +98,7 @@ for (const c of allCards) {
   const p = { trend, low: f('low'), avg: f('avg'), avg1: f('avg1'), avg7: f('avg7'), avg30: f('avg30') };
   if (holoOnly) p.foil = true; else if (rev(g, 'trend')) p.trendFoil = rev(g, 'trend');
   for (const k of Object.keys(p)) if (p[k] == null) delete p[k];
-  const hs = histOf(c.set);
+  const hs = histOf(c.set ?? 'sealed');
   let h = hs[c.id] ?? [];
   if (!h.length) {
     if (p.avg30) h.push([daysAgo(30), p.avg30]);

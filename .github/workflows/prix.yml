@@ -41,6 +41,10 @@ jobs:
         run: node scripts/fetch-official.mjs --minutes 25
       - name: Séries et cartes WS Lounge (EN, JP) + liens Cardmarket
         run: node scripts/import-ws.mjs
+      - name: Produits scellés (Cardmarket + images officielles)
+        continue-on-error: true
+        timeout-minutes: 25
+        run: node scripts/import-sealed.mjs --minutes 15
       - name: Accès aux images (site officiel et vignettes)
         continue-on-error: true
         run: |

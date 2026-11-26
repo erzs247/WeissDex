@@ -31,8 +31,8 @@ const PET_ON = false;
 const nextLang = (l) => CARD_LANGS[(CARD_LANGS.indexOf(l) + 1) % CARD_LANGS.length];
 const TEXT = {
   fr: {
-    sealed: 'Scellé', setsTab: 'Séries', toggleView: 'Changer l\'affichage',
-    cats: { booster: 'Boosters', box: 'Booster Box', case: 'Cases de 6 Booster Box', deck: 'Decks', kit: 'Kits & coffrets' },
+    sealed: 'Scellé', setsTab: 'Séries', sealedSearch: 'Rechercher un produit (animé, booster, deck…)', toggleView: 'Changer l\'affichage',
+    cats: { booster: 'Boosters', box: 'Boîtes de boosters', case: 'Cartons', deck: 'Decks de démarrage', kit: 'Coffrets (Meister, Supply, Premium)' },
     catOne: { booster: 'Booster', box: 'Booster Box', case: 'Case de 6 Booster Box', deck: 'Deck', kit: 'Kit' },
     sealedNote: (d) => `Prix tendance Cardmarket des produits scellés${d ? ` · mis à jour le ${d}` : ''}. Les produits sans prix n'ont pas encore de ventes.`,
     sealedCount: (n) => `${n} ${plural(n, 'produit scellé', 'produits scellés')}`,
@@ -271,8 +271,8 @@ const TEXT = {
     color: { Yellow: 'Jaune', Green: 'Vert', Red: 'Rouge', Blue: 'Bleu', Purple: 'Violet' },
   },
   en: {
-    sealed: 'Sealed', setsTab: 'Sets', toggleView: 'Change view',
-    cats: { booster: 'Boosters', box: 'Booster boxes', case: 'Cases of 6 booster boxes', deck: 'Decks', kit: 'Kits & box sets' },
+    sealed: 'Sealed', setsTab: 'Sets', sealedSearch: 'Search a product (anime, booster, deck…)', toggleView: 'Change view',
+    cats: { booster: 'Boosters', box: 'Booster boxes', case: 'Cartons', deck: 'Trial decks', kit: 'Sets (Meister, Supply, Premium)' },
     catOne: { booster: 'Booster', box: 'Booster box', case: 'Case of 6 booster boxes', deck: 'Deck', kit: 'Kit' },
     sealedNote: (d) => `Cardmarket trend prices for sealed products${d ? ` · updated ${d}` : ''}. Products without a price have no sales yet.`,
     sealedCount: (n) => `${n} sealed ${plural(n, 'product', 'products')}`,
@@ -802,6 +802,8 @@ function change(id, days) {
 function cmUrl(card) {
   const { gameSlug = 'WeissSchwarz', languageIds = { en: 1, fr: 2, ja: 7 } } = config.cardmarket ?? {};
   if (card.cardmarket?.path && isSealed(card)) return { url: `https://www.cardmarket.com/${lang}/${gameSlug}/${card.cardmarket.path}`, exact: true };
+  // scellé : recherche Cardmarket sur le nom exact du produit
+  if (isSealed(card)) return { url: `https://www.cardmarket.com/${lang}/${gameSlug}/Products/Search?searchString=${encodeURIComponent(card.name)}`, exact: !!card.cardmarket };
   const printedIn = card.languages?.includes(cardLang) ? cardLang : card.languages?.[0] ?? 'en';
   if (card.cardmarket?.path) return { url: `https://www.cardmarket.com/${lang}/${gameSlug}/${card.cardmarket.path}?language=${languageIds[printedIn]}`, exact: true };
   // carte japonaise : Cardmarket ne vend presque que l'édition anglaise, on cherche sa version anglaise
@@ -1036,13 +1038,22 @@ function homeTopbar(withMode) {
   setTopbar(`<h1>${L.home}</h1>${withMode ? `<button class="icon-btn" data-action="home-mode" aria-label="${L.toggleView}">${mode === 'grid' ? I.listIcon : I.gridIcon}</button>` : ''}${langBtn()}${news.length ? newsBtn() : ''}${globeBtn()}${accountBtn()}<button class="icon-btn" data-action="settings" aria-label="${L.settings}">${I.gear}</button>`);
 }
 const homeTabs = (active) => `<div class="seg" role="tablist">${[['home', L.setsTab], ...(sealed.some(inCardLang) ? [['sealed', L.sealed]] : []), ['lists', L.ls.tab], ...(extras.some(inCardLang) ? [['extra', L.ex.tab]] : [])].map(([h, l]) => `<button data-nav="${h}" aria-pressed="${active === h}">${l}</button>`).join('')}</div>`;
+let sealedCat = 'box', sealedQuery = '';
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-sealed-cat]'); if (b) { sealedCat = b.dataset.sealedCat; renderSealed(); } });
 function renderSealed() {
   homeTopbar(false);
   const updated = priceFile.updatedAt ? fmt.date.format(parseDay(priceFile.updatedAt)) : '';
-  const cats = ['booster', 'box', 'case', 'deck', 'kit'];
+  const cats = ['box', 'booster', 'case', 'deck', 'kit'];
+  const q = fold(sealedQuery.trim());
+  const shown = sealed.filter((s) => inCardLang(s) && (!q || fold(`${s.name} ${s.print ?? ''} ${s.set ? blockName(setOf(s.set)?.block) : ''}`).includes(q)));
+  const present = cats.filter((c) => shown.some((s) => s.category === c));
+  if (sealedCat !== 'all' && !present.includes(sealedCat)) sealedCat = 'all';
   view.innerHTML = `<div class="stack">
     ${homeTabs('sealed')}
-    ${cats.map((cat) => { const list = sealed.filter((s) => s.category === cat && inCardLang(s)).sort((a, b) => a.order - b.order); return list.length ? `<h2 class="section-title">${L.cats[cat]}</h2><div class="sealed-grid">${list.map(sealedTile).join('')}</div>` : ''; }).join('')}
+    <input class="search" id="sealedSearch" type="search" placeholder="${L.sealedSearch}" value="${esc(sealedQuery)}" autocomplete="off">
+    <div class="chips wrap">${[['all', L.ownF.all], ...present.map((c) => [c, L.cats[c]])].map(([k, l]) => `<button class="chip" data-sealed-cat="${k}" aria-pressed="${sealedCat === k}">${esc(l)}</button>`).join('')}</div>
+    ${cats.filter((cat) => sealedCat === 'all' || sealedCat === cat).map((cat) => { const list = shown.filter((s) => s.category === cat).sort((a, b) => a.order - b.order); return list.length ? `<h2 class="section-title">${L.cats[cat]} <small class="num">${list.length}</small></h2><div class="sealed-grid">${list.map(sealedTile).join('')}</div>` : ''; }).join('')}
+    ${shown.length ? '' : `<div class="empty"><strong>${L.noResult}</strong></div>`}
     <p class="note">${L.sealedNote(updated)}</p>
   </div>`;
 }
@@ -1602,7 +1613,7 @@ let lastFocus = null;
 function openCard(id, keepNav) {
   const c = cardsById.get(id);
   if (!c) return;
-  ensureHistory([c.set], () => { if (openId === id) openCard(id, true); });
+  ensureHistory([c.set ?? (isSealed(c) ? 'sealed' : null)], () => { if (openId === id) openCard(id, true); });
   if (!keepNav) navList = [...new Set([...view.querySelectorAll('[data-open]')].map((e) => e.dataset.open))];
   if (!openId) lastFocus = document.activeElement;
   openId = id;
@@ -2926,7 +2937,7 @@ function paidInput(el, commit) {
 document.addEventListener('input', (e) => { if (e.target.id === 'cardPaid') paidInput(e.target, false); });
 document.addEventListener('change', (e) => { if (e.target.id === 'cardPaid') paidInput(e.target, true); });
 document.addEventListener('input', (e) => {
-  const map = { setSearch: [(v) => { homeQuery = v; }, renderHome], cardSearch: [(v) => { searchQuery = v; }, renderSearch], setCardSearch: [(v) => { setQuery = v; }, () => currentRender()] };
+  const map = { setSearch: [(v) => { homeQuery = v; }, renderHome], sealedSearch: [(v) => { sealedQuery = v; }, renderSealed], cardSearch: [(v) => { searchQuery = v; }, renderSearch], setCardSearch: [(v) => { setQuery = v; }, () => currentRender()] };
   const m = map[e.target.id];
   if (!m) return;
   m[0](e.target.value);
